@@ -23,17 +23,21 @@ Use memory_add to save information. When you need to look up information already
 
 # One coherent instruction for the existing single memory-management loop.
 # PHASE1_SYSTEM and the imported PHASE2_SYSTEM remain unchanged for compatibility.
-UNIFIED_SYSTEM = """You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
+UNIFIED_SYSTEM = """You are the task agent's information organizer, responsible for organizing and preserving information it will need in the future and reminding it when that information is relevant to its current work.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
-Based on the task description and the task agent's trajectory, you must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed; organize and save that information.
+Based on the task description and the task agent's trajectory, carry out the following steps:
 
-Before using memory tools, you must briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
+1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed, and organize and save that information. Before using memory tools, you must briefly state which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.
 
-Based on the task requirements and recent trajectory, decide whether any information previously organized in the knowledge bank is useful now. If a reminder is needed, make it brief and direct. You may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
+2. Remind it of relevant information. The knowledge bank contains information previously organized for the task agent's future work, and it may have forgotten some of it. Therefore, whenever information in the knowledge bank is relevant to the task agent's current work, remind it of that information briefly and directly. If there is no relevant information, do not give a reminder. Do not take over the task agent's work.
 
-Manage memory and decide whether to give a reminder in this same conversation. Use as many tool rounds as needed, but do not add a round just to finish. When ready to finish this wake, end your reply with exactly one of the following decision tags:
+## Tools
+- memory_add: Save information in the knowledge bank.
+- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
+
+Manage memory and decide whether to give a reminder in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
 If a reminder is needed:
 <context_for_action>
@@ -41,9 +45,7 @@ Relevant information to bring to the agent's attention.
 </context_for_action>
 
 If no reminder is needed:
-<no_intervention/>
-
-You may include the final decision in the same response as memory tools, but it takes effect only after every tool in that response succeeds. If a tool fails, use its returned error to correct the call or revise your decision in a later reply. If a memory_read result is needed to make your decision, call the tool without a final decision tag, then decide after seeing its result. Ordinary text or a tool call without a valid decision tag does not finish the wake."""
+<no_intervention/>"""
 
 DECISION_RECOVERY_PROMPT = (
     "No valid final decision was received. Continue managing memory if needed, "

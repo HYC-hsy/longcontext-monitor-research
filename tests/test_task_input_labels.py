@@ -33,7 +33,7 @@ def test_tag_meanings_and_ten_task_turn_instruction_are_explicit():
     assert "<task_description> tags contain the task agent's original task" in UNIFIED_SYSTEM
     assert "<task_trajectory> tags contain the task agent's newly observed execution trajectory" in UNIFIED_SYSTEM
     assert 'not your own task' not in UNIFIED_SYSTEM
-    assert 'you must predict which information received this time' in UNIFIED_SYSTEM
+    assert 'You must predict which information received this time' in UNIFIED_SYSTEM
     assert 'will first use only after at least ten task-agent turns have passed' in UNIFIED_SYSTEM
     assert 'organize and save that information' in UNIFIED_SYSTEM
     assert 'Before using memory tools, you must briefly state' in UNIFIED_SYSTEM

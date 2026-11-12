@@ -13,17 +13,21 @@ from memory_agent.memory import read_context_predictive_memory_agent as module
 from memory_agent.memory.read_context_predictive_memory_agent import (
     BANK_TOOLS, PUBLIC_FORECAST_REMINDER, UNIFIED_SYSTEM)
 
-EXPECTED_SYSTEM = '''You are the task agent's memory manager, responsible for predicting and preserving information it will need in the future and reminding it at appropriate times of memories useful for its current work.
+EXPECTED_SYSTEM = '''You are the task agent's information organizer, responsible for organizing and preserving information it will need in the future and reminding it when that information is relevant to its current work.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
-Based on the task description and the task agent's trajectory, you must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed; organize and save that information.
+Based on the task description and the task agent's trajectory, carry out the following steps:
 
-Before using memory tools, you must briefly state in ordinary reply text which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed. Give a concise public summary; no special format is needed, and do not disclose private reasoning. Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".
+1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed, and organize and save that information. Before using memory tools, you must briefly state which information you plan to preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.
 
-Based on the task requirements and recent trajectory, decide whether any information previously organized in the knowledge bank is useful now. If a reminder is needed, make it brief and direct. You may synthesize information, identify connections, and offer grounded inferences or suggestions; preserve the information's original uncertainty when expressing them. Default to no intervention: do not intervene if no reminder is needed now, or if the relevant information is already visible in the recent trajectory and the agent's actions indicate that it has taken it into account. Do not take over the task agent's work.
+2. Remind it of relevant information. The knowledge bank contains information previously organized for the task agent's future work, and it may have forgotten some of it. Therefore, whenever information in the knowledge bank is relevant to the task agent's current work, remind it of that information briefly and directly. If there is no relevant information, do not give a reminder. Do not take over the task agent's work.
 
-Manage memory and decide whether to give a reminder in this same conversation. Use as many tool rounds as needed, but do not add a round just to finish. When ready to finish this wake, end your reply with exactly one of the following decision tags:
+## Tools
+- memory_add: Save information in the knowledge bank.
+- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
+
+Manage memory and decide whether to give a reminder in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
 If a reminder is needed:
 <context_for_action>
@@ -31,36 +35,27 @@ Relevant information to bring to the agent's attention.
 </context_for_action>
 
 If no reminder is needed:
-<no_intervention/>
-
-You may include the final decision in the same response as memory tools, but it takes effect only after every tool in that response succeeds. If a tool fails, use its returned error to correct the call or revise your decision in a later reply. If a memory_read result is needed to make your decision, call the tool without a final decision tag, then decide after seeing its result. Ordinary text or a tool call without a valid decision tag does not finish the wake.'''
+<no_intervention/>'''
 
 
 def test_exact_approved_coherent_system():
     assert UNIFIED_SYSTEM == EXPECTED_SYSTEM
     assert "You help the task agent" not in UNIFIED_SYSTEM
-    assert UNIFIED_SYSTEM.count("Default to no intervention") == 1
+    assert "Default to no intervention" not in UNIFIED_SYSTEM
     assert UNIFIED_SYSTEM.count("<no_intervention/>") == 1
     assert UNIFIED_SYSTEM.count("<context_for_action>") == 1
 
 
-def test_only_prompt_values_and_wrappers_change_from_pinned_parent():
-    # SHA-256 of the AST at d0e6965cf7c0e88d3c274ab749c7ac23fe2589ea
-    # after masking UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER and the two
-    # _build_phase1_prompt return values. Every other AST node is unchanged.
+def test_only_unified_system_changes_from_pinned_parent():
+    # AST at 10fe52e after masking only UNIFIED_SYSTEM. This also protects
+    # soft reminder, schemas, recovery, input wrappers and the tool loop.
     tree = ast.parse(Path(module.__file__).read_text())
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
-                and target.id in ['UNIFIED_SYSTEM', 'PUBLIC_FORECAST_REMINDER']
-                for target in node.targets):
+                and target.id == 'UNIFIED_SYSTEM' for target in node.targets):
             node.value = ast.Constant('PROMPT_VALUE_ONLY')
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == '_build_phase1_prompt':
-            for child in ast.walk(node):
-                if isinstance(child, ast.Return):
-                    child.value = ast.Constant('WRAPPER_VALUE_ONLY')
     digest = hashlib.sha256(ast.dump(tree, include_attributes=False).encode()).hexdigest()
-    assert digest == 'ddf1f23abeb0917db50e5aa00ced13210dba129c1fb1ce81c306445e0865ca33'
+    assert digest == 'aa92c638efefe527e1b7b82e582affefc4361abe0323e8037e2db0cff6ffcb97'
 
 
 @pytest.mark.parametrize('provider', ['openai', 'anthropic'])
@@ -122,7 +117,7 @@ EXPECTED_PUBLIC_REMINDER = 'You must include a brief public summary of the infor
 def test_public_reminder_matches_information_forecast():
     assert PUBLIC_FORECAST_REMINDER == EXPECTED_PUBLIC_REMINDER
     assert "private reasoning" not in PUBLIC_FORECAST_REMINDER
-    assert "do not disclose private reasoning" in UNIFIED_SYSTEM
+    assert "do not disclose private reasoning" not in UNIFIED_SYSTEM
     for text in [UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER]:
         assert 'problems or decisions' not in text
         assert 'how you anticipate it will be useful in work after ten task-agent turns have passed' in text
@@ -131,31 +126,35 @@ def test_public_reminder_matches_information_forecast():
     assert 'the task agent may use' not in UNIFIED_SYSTEM
     assert 'four turns' not in UNIFIED_SYSTEM
     assert 'four turns' not in PUBLIC_FORECAST_REMINDER
-    assert 'brief and direct' in UNIFIED_SYSTEM
+    assert 'briefly and directly' in UNIFIED_SYSTEM
 
 
-def test_completion_protocol_is_unchanged_from_pinned_parent():
-    protocol = UNIFIED_SYSTEM.split('Manage memory and decide whether', 1)[1]
-    assert hashlib.sha256(protocol.encode()).hexdigest() == 'b1ee9757eb136840a0b9eef29f889c10e105b1357546b925ef5611c98f5f8219'
+def test_completion_tags_remain_but_long_protocol_guidance_is_removed():
+    assert UNIFIED_SYSTEM.endswith('<no_intervention/>')
+    assert 'exactly one of the following decision tags' in UNIFIED_SYSTEM
+    for removed in ['Use as many tool rounds', 'You may include the final decision',
+                    'If a tool fails', 'Ordinary text or a tool call without']:
+        assert removed not in UNIFIED_SYSTEM
 
 
-def test_first_use_boundary_applies_to_preservation_not_current_reminders():
-    selection = UNIFIED_SYSTEM.split('\n\n')[2]
+def test_first_use_guidance_does_not_delay_related_reminders():
+    selection = UNIFIED_SYSTEM.split('1. Predict and save.', 1)[1].split('2. Remind', 1)[0]
     assert 'will first use only after at least ten task-agent turns have passed' in selection
     assert 'organize and save that information' in selection
-    for weaker_or_extra_rule in ['may use', 'might use', 'next 10', 'fifth turn', 'first four turns']:
-        assert weaker_or_extra_rule not in UNIFIED_SYSTEM
-        assert weaker_or_extra_rule not in PUBLIC_FORECAST_REMINDER
-    reminder = UNIFIED_SYSTEM.split('Based on the task requirements', 1)[1].split(
-        'Manage memory and decide whether', 1)[0]
-    assert 'is useful now' in reminder
-    assert 'brief and direct' in reminder
+    reminder = UNIFIED_SYSTEM.split('2. Remind', 1)[1].split('## Tools', 1)[0]
+    assert "whenever information in the knowledge bank is relevant to the task agent's current work" in reminder
+    assert 'it may have forgotten some of it' in reminder
+    assert 'If there is no relevant information, do not give a reminder.' in reminder
     assert 'ten task-agent turns' not in reminder
+    for removed in ['already visible', 'taken it into account', 'Default to no intervention']:
+        assert removed not in UNIFIED_SYSTEM
 
 
-def test_memory_role_and_reminder_policy_are_unchanged_from_parent():
+def test_information_organizer_role_and_separate_tool_guidance():
     role = UNIFIED_SYSTEM.split('\n\n', 1)[0]
-    assert hashlib.sha256(role.encode()).hexdigest() == '1fd3581adf5ce37c6a1844d108733cbc57ff11c5fb0841f93b7c729511db38b6'
-    reminder = UNIFIED_SYSTEM.split('Based on the task requirements', 1)[1].split(
-        'Manage memory and decide whether', 1)[0]
-    assert hashlib.sha256(reminder.encode()).hexdigest() == 'a17f7b8bd4379dee4d9915a147e1425f5e2473cd371a99c59ee4d640f7132b3d'
+    assert "task agent's information organizer" in role
+    assert 'relevant to its current work' in role
+    assert 'useful now' not in role
+    assert '## Tools\n- memory_add:' in UNIFIED_SYSTEM
+    assert '- memory_read: Read all information currently saved' in UNIFIED_SYSTEM
+    assert 'Set bank_id to "knowledge"' in UNIFIED_SYSTEM
