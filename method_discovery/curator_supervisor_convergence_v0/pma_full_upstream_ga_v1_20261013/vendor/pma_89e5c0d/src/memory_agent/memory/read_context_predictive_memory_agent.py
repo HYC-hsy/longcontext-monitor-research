@@ -29,9 +29,9 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time the task agent will first use only after at least ten task-agent turns have passed. Before saving, you must briefly explain which information you considered and how it will be used in the future, distinguishing confirmed findings from tentative inferences. Save only confirmed findings.
+1. Predict and save. You must predict which information received this time the task agent will first use only after at least six task-agent turns have passed. Before saving, you must briefly explain the future uses of this information. You must distinguish confirmed findings from tentative inferences within it, and preserve their respective levels of certainty. Organize and save this information based on your prediction.
 
-2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. If there is no relevant information, provide none. Do not take over the task agent's work.
+2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. Preserve the information's original level of certainty. If there is no relevant information, provide none. Do not take over the task agent's work.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
@@ -108,7 +108,7 @@ def parse_final_decision(raw):
 
 PUBLIC_FORECAST_REMINDER = (
     "You must include a brief public summary of the information you plan to "
-    "preserve and how you anticipate it will be useful in work after ten task-agent turns have passed.")
+    "preserve and how you anticipate it will be useful in work after six task-agent turns have passed.")
 
 
 def has_public_text(text):
