@@ -110,7 +110,7 @@ def test_no_read_single_call_next_wake_does_not_reexecute(add):
     run(a, 'Only eight new actor steps', 8)
     assert len(a.llm.calls) == 2
     request = a.llm.calls[1]
-    assert request['prompt'] == 'Only eight new actor steps'
+    assert request['prompt'] == '<task_trajectory>\nOnly eight new actor steps\n</task_trajectory>'
     assert str(request).count('Original exact task') == 1
     assert len(a.memory.knowledge) == int(add)
     assert len(receipts(request)) == int(add)
@@ -169,7 +169,7 @@ def test_long_history_pins_task_current_wake_and_tool_pairs(monkeypatch):
     assert 'LATEST' * 100 in str(latest)
     assert any(m.get('tool_call_id') == 'final-read' for m in latest['message_history'])
     assert len(a._phase1_history) < 20
-    assert latest['message_history'][0]['content'] == [{'type': 'text', 'text': '[Task Description]\nOriginal exact task'}]
+    assert latest['message_history'][0]['content'] == [{'type': 'text', 'text': '<task_description>\nOriginal exact task\n</task_description>'}]
 
 
 def test_reset_bank_isolation_and_oversize(monkeypatch):
@@ -182,5 +182,5 @@ def test_reset_bank_isolation_and_oversize(monkeypatch):
     monkeypatch.setattr(GAHistoryConfig, 'context_win', 10)
     oversized = Agent(llm=Script(response()))
     run(oversized, task='unaltered task' * 100)
-    assert oversized.llm.calls[0]['prompt'] == '[Task Description]\n' + 'unaltered task' * 100
+    assert oversized.llm.calls[0]['prompt'] == '<task_description>\n' + 'unaltered task' * 100 + '\n</task_description>'
     assert len(oversized.llm.calls) == 1

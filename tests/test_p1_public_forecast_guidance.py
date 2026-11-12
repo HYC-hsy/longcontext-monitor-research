@@ -45,7 +45,7 @@ def test_tool_only_add_continues_with_lexical_reminder(tmp_path):
     run(a, 'Exact raw batch <history>not rewritten</history>', 8)
     assert len(a.llm.calls) == 3
     assert a.llm.calls[2]['system'] == UNIFIED_SYSTEM
-    assert a.llm.calls[2]['prompt'] == 'Exact raw batch <history>not rewritten</history>'
+    assert a.llm.calls[2]['prompt'] == '<task_trajectory>\nExact raw batch <history>not rewritten</history>\n</task_trajectory>'
     assert PUBLIC_FORECAST_REMINDER not in str(a._phase1_history)
     assert a._phase2_history == []
     assert [row['system'] for row in rows(tmp_path, 'memory_payload.jsonl')] == [
@@ -134,7 +134,7 @@ def test_provider_requests_and_public_audit_keep_private_state_private(provider,
             UNIFIED_SYSTEM, REMINDED, REMINDED, UNIFIED_SYSTEM]
         assert any(item.get('encrypted_content') == 'opaque-private-fixture'
                    for item in wire[2]['input'])
-        assert wire[2]['input'][-1] == {'role': 'user', 'content': 'Exact batch 8'}
+        assert wire[2]['input'][-1] == {'role': 'user', 'content': '<task_trajectory>\nExact batch 8\n</task_trajectory>'}
     else:
         assert [''.join(block['text'] for block in row['system']) for row in wire] == [
             UNIFIED_SYSTEM, REMINDED, REMINDED, UNIFIED_SYSTEM]

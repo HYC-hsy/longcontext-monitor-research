@@ -60,7 +60,7 @@ def test_terminal_tool_results_survive_next_wake_in_native_order():
     wake(a,'NEXT EXACT BATCH',8)
     assert len(a.llm.calls)==2 and len(a.memory.knowledge)==1
     req=a.llm.calls[-1]
-    assert req['prompt']=='NEXT EXACT BATCH'
+    assert req['prompt']=='<task_trajectory>\nNEXT EXACT BATCH\n</task_trajectory>'
     actual=response_input(req['message_history'], req['prompt'])
     kinds=[x.get('type',x.get('role')) for x in actual]
     assert kinds==['user','assistant','function_call','function_call_output','user']

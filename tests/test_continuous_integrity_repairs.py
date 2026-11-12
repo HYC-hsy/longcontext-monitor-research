@@ -144,7 +144,7 @@ def test_successful_phase_outputs_and_original_prompts_preserved(cls, decision):
         empty = HistoricalAgent()
         assert result.user_prompt_phase1 == empty._build_phase1_prompt('EXACT observation', 8)
     else:
-        assert result.user_prompt_phase1 == '[Task Description]\nEXACT task'
+        assert result.user_prompt_phase1 == '<task_description>\nEXACT task\n</task_description>'
         assert result.user_prompt_phase2 is result.raw_response_phase2 is None
         assert agent._phase2_history == []
         assert all(request.get('tools') for request in agent.llm.calls)

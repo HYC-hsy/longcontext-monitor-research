@@ -179,7 +179,7 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
         exact = "\n\n".join(json.dumps(item["event"]["trajectory"], ensure_ascii=False, sort_keys=True)
                             for item in batch)
         request = payloads[1 + wake]
-        assert request["prompt"] == exact
+        assert request["prompt"] == '<task_trajectory>\n' + exact + '\n</task_trajectory>'
         assert [tool["function"]["name"] for tool in request["tools"]] == ["memory_add", "memory_read"]
     assert json.loads((private / "archive/memory.json").read_text())["knowledge"] == []
 

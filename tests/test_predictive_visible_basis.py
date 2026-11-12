@@ -132,7 +132,7 @@ def test_same_response_text_and_add_only_receipt_without_extra_call(provider, te
     assert json.loads(receipt['content'])['success'] is True
     payload = rows(tmp_path, 'memory_payload.jsonl')
     assert [row['system'] for row in payload] == [UNIFIED_SYSTEM, UNIFIED_SYSTEM + ('\n\n' + PUBLIC_FORECAST_REMINDER if not has_public_text(text) else '')]
-    assert payload[0]['prompt'] == '[Task Description]\nExact task <history>not rewritten</history>'
+    assert payload[0]['prompt'] == '<task_description>\nExact task <history>not rewritten</history>\n</task_description>'
     assert result.reasoning_phase1 is result.reasoning_phase2 is None
     assert 'private-fixture' not in ''.join(p.read_text() for p in tmp_path.glob('*.jsonl'))
 

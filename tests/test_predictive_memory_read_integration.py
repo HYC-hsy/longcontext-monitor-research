@@ -118,9 +118,9 @@ def test_actual_episode_keeps_initial_and_eight_new_step_cadence(tmp_path):
         assert episode.batch_steps == 2
     asyncio.run(exercise())
     assert len(llm.calls) == 3
-    assert llm.calls[0]['prompt'] == '[Task Description]\ntask EXACT <history>verbatim</history>'
-    assert llm.calls[1]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(1, 9))
-    assert llm.calls[2]['prompt'] == '\n\n'.join(f'actor-step-{i}' for i in range(9, 17))
+    assert llm.calls[0]['prompt'] == '<task_description>\ntask EXACT <history>verbatim</history>\n</task_description>'
+    assert llm.calls[1]['prompt'] == '<task_trajectory>\n' + '\n\n'.join(f'actor-step-{i}' for i in range(1, 9)) + '\n</task_trajectory>'
+    assert llm.calls[2]['prompt'] == '<task_trajectory>\n' + '\n\n'.join(f'actor-step-{i}' for i in range(9, 17)) + '\n</task_trajectory>'
 
 
 def test_candidate_registry_source_identity_and_actor_projection(monkeypatch):
@@ -229,7 +229,7 @@ def test_large_original_and_read_receipt_are_not_new_failure_limits():
     a = Agent(llm=Script(response(call('memory_read', {'bank_id': 'knowledge'})), response()))
     memory_id = a.memory.save_knowledge(bank)
     run(a, task=task)
-    assert a.llm.calls[0]['prompt'] == '[Task Description]\n' + task
+    assert a.llm.calls[0]['prompt'] == '<task_description>\n' + task + '\n</task_description>'
     next_request = a.llm.calls[1]
     assert task in str(next_request)
     read = next(json.loads(m['content']) for m in next_request['message_history'] if m['role'] == 'tool')

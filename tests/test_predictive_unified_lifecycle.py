@@ -19,7 +19,7 @@ async def exercise(fail, root, monkeypatch):
         def construct(*a,**kw):
             agent=original_construct(*a,**kw)
             async def failing(*,prompt,**kwargs):
-                if prompt.startswith('[Task Description]'):
+                if prompt.startswith('<task_description>\n'):
                     return SimpleNamespace(content='',tool_calls=[SimpleNamespace(id='saved',function=SimpleNamespace(name='memory_add',arguments={'content':'partially saved'}))])
                 raise RuntimeError('synthetic provider failure')
             agent._memory_llm.call=failing
