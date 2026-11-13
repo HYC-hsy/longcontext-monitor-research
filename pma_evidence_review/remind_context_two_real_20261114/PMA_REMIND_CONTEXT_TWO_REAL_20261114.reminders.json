@@ -1,0 +1,76 @@
+{
+  "reminders": [
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-4dff2b8103c14159",
+      "actor_attempt": 5,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nCRITICAL REMINDER: When using stan.build(), you MUST set random_seed=1 (this is a strict requirement from the task constraints).\n\nThe R script shows these sampling parameters that must be replicated in Python:\n- chains=4, iter=2000, warmup=1000, thin=2, seed=1\n- Control parameters: adapt_delta=0.93, max_treedepth=14, adapt_gamma=0.05, adapt_kappa=0.75, adapt_t0=10, adapt_init_buffer=100, adapt_term_buffer=50, adapt_window=25\n- init_r=0.1\n\nThe Stan model has been fully extracted from the R script (lines 6-103). The data preparation shows:\n- H matrix = cbind(1, train_X[:,0], train_X[:,1]) - first two columns of train_X plus intercept\n- H_new matrix constructed the same way from test_X\n\nMeta parameters: P=3, jitter=1e-06\n\nPyStan 3.10.0 has been successfully installed. Next step is to write the Python conversion script.\n</memory_context>",
+      "request_ready_event_id": "evt_06031e98175444718b9e12f06779be01",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-4dff2b8103c14159",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**CRITICAL: PyStan 3 API Parameter Issue Detected**\n\nThe current error shows PyStan 3 rejects these parameters in the `.sample()` call:\n- `seed` (Unknown field)\n- `max_treedepth` (Unknown field)  \n- `adapt_delta` (Unknown field)\n\n**PyStan 3.x API Difference from RStan:**\n- PyStan 3 uses `posterior.sample(num_chains=, num_samples=, num_warmup=, num_thin=)` \n- Control parameters are NOT passed directly to `.sample()` in PyStan 3\n- Random seed should NOT be passed to `.sample()` (already set in `stan.build(random_seed=1)`)\n\n**Required Fix:**\nRemove these parameters from the `posterior.sample()` call:\n- Remove `seed=1`\n- Remove `max_treedepth=14`\n- Remove `adapt_delta=0.93`\n\nKeep only:\n- `num_chains=4`\n- `num_samples=1000` \n- `num_warmup=1000`\n- `num_thin=2`\n\nThe random_seed=1 is already correctly set in stan.build() which controls reproducibility for the entire sampling process.\n</memory_context>",
+      "request_ready_event_id": "evt_38c31fad29154f73852d1dc38cc35694",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b187933a4b0a43dc",
+      "actor_attempt": 1,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nTask Overview:\n1. Create /app/repo and initialize git repository\n2. Fetch bundle1.bundle into branch1 (from HEAD reference)\n3. Fetch bundle2.bundle into branch2 (from HEAD reference)\n4. Merge branch2 into branch1 (branch1 is base)\n5. Resolve conflicts ensuring /app/repo/algo.py exists\n6. Implement map(2D array of integers) -> 2D array in algo.py\n7. The mapping logic must be derived from examples in /app/examples.json\n8. Verify algo.py produces correct outputs for all examples\n9. The solution must generalize to hidden test cases\n\nCritical requirements:\n- algo.py must exist after merge\n- Must contain function named \"map\" with signature: 2D int array -> 2D array\n- Pattern must be inferred from /app/examples.json and generalize correctly\n- All example outputs must match exactly (element by element)\n</memory_context>",
+      "request_ready_event_id": "evt_a3a243e4c2cb4333aca36c7ebdec460d",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b187933a4b0a43dc",
+      "actor_attempt": 5,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent is blocked on git installation. The environment lacks git, and apt-get is timing out. Consider alternative approaches:\n\n1. Try installing git from a precompiled binary or alternative source\n2. Use Python's gitpython library if Python is available\n3. Manually unpack git bundles (they're just packfiles that can be extracted)\n4. Check if git might already be installed in an unusual location\n\nKey files confirmed present in /app/:\n- bundle1.bundle (1009 bytes)\n- bundle2.bundle (1244 bytes) \n- examples.json (6977 bytes)\n- /app/repo directory exists (already created)\n\nAfter git issues are resolved, remember:\n- bundle1 → branch1, bundle2 → branch2\n- Merge branch2 into branch1 (branch1 is base)\n- Must implement algo.py with map(2D int array) → 2D array\n- Pattern must be derived from /app/examples.json\n</memory_context>",
+      "request_ready_event_id": "evt_345438b9bffb4625adde0943f133ef94",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b187933a4b0a43dc",
+      "actor_attempt": 9,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nBREAKTHROUGH: Python found in /opt/m4-runtime/eval-env/bin/python3.12\n\nThe agent can now:\n1. Use /opt/m4-runtime/eval-env/bin/python3 to work with git bundles (via GitPython/dulwich)\n2. Or proceed to implement algo.py directly using this Python interpreter\n\nCheck if /opt/m4-runtime/eval-env has git tools or GitPython installed. If not, the Python environment can be used to:\n- Install GitPython: /opt/m4-runtime/eval-env/bin/pip install GitPython\n- Or manually extract bundle contents using Python's zipfile/tarfile\n- Or implement a pure Python git bundle reader\n\nAfter resolving bundles:\n- Bundle workflow: bundle1 → branch1, bundle2 → branch2, merge branch2 into branch1\n- Implement algo.py with map(2D int array) → 2D array\n- Pattern source: /app/examples.json (6977 bytes) - must be read and analyzed\n- Must generalize to hidden test cases\n</memory_context>",
+      "request_ready_event_id": "evt_bdca7808d97a4538a7dd7d8083d2b06e",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b187933a4b0a43dc",
+      "actor_attempt": 17,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nMAJOR PROGRESS: Dulwich (pure Python git) successfully installed and repo initialized at /app/repo! This solves the git binary dependency issue that blocked GitPython.\n\nCORRECTION TO KNOWLEDGE BANK: The entry [VDifyTL7] stating \"pip install GitPython FAILS without --break-system-packages flag\" and \"GitPython and Dulwich both unavailable\" is now outdated. In turn 13, pip install with --break-system-packages succeeded for GitPython. In turn 15, Dulwich installed successfully and is now working (turn 16 confirmed repo initialization).\n\nNEXT STEPS NOW UNBLOCKED:\n1. Fetch bundle1.bundle into branch1 using dulwich.bundle.read_bundle\n2. Fetch bundle2.bundle into branch2 \n3. Merge branch2 into branch1\n4. Extract and analyze /app/examples.json (6977 bytes - the pattern source)\n5. Implement algo.py with map function based on discovered pattern\n\nThe agent is now on the correct path after 16 turns of troubleshooting the git installation.\n</memory_context>",
+      "request_ready_event_id": "evt_98adb09d98d7433fb9da7ed5d3914ffe",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b187933a4b0a43dc",
+      "actor_attempt": 21,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nMAJOR PROGRESS UPDATE (Turn 20): Both branches successfully created and branch1 checked out with working files!\n\nCURRENT STATE CONFIRMED:\n- branch1 created: c8dca82d38e152cd58eb0b31394af08f37c1385a (from bundle1 HEAD)\n- branch2 created: 836b057010803a50730966151008f40d7b9735ed (from bundle2 HEAD)\n- branch1 checked out with files: /app/repo/algo.py and /app/repo/utils.py\n- Both bundles also reference refs/heads/main: ef202c5435d34da584a73c5bde633ad0ce190fe7\n\nNEXT IMMEDIATE STEPS:\n1. Check out branch2 to see its files (likely different algo.py version)\n2. Merge branch2 into branch1 (dulwich merge or manual 3-way merge)\n3. Resolve conflicts if any - ensure algo.py exists in final result\n4. Read /app/examples.json (6977 bytes) to understand the pattern\n5. Implement/fix algo.py map function based on discovered pattern\n6. Verify outputs match all examples in examples.json\n\nCRITICAL REMINDER: The task requires the map function to GENERALIZE to hidden test cases, not just memorize the examples. Pattern analysis from examples.json is the core challenge after merge completes.\n</memory_context>",
+      "request_ready_event_id": "evt_41784f8e7c994ee9981451b55811abad",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b187933a4b0a43dc",
+      "actor_attempt": 25,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nPATTERN DISCOVERED FROM examples.json (Turn 24):\n- All outputs use PERIOD-3 repeating pattern: values tile with (i+j)%3 positioning\n- Example 1: non-zero diagonal [1,2,4] → output tiles [2,4,1] repeating\n- Example 2: non-zero diagonal [2,8,3] → output tiles [2,8,3] repeating  \n- Example 3: non-zero diagonal [4,8,3] → output tiles [4,8,3] repeating\n\nCRITICAL: Neither existing algo.py is correct!\n- branch1 algo.py: uses (i+j)%4 (WRONG - should be %3)\n- branch2 algo.py: uses (i-j)%3 for collection, (i+j)%3 for output (closer but wrong function name \"transform\" not \"map\")\n\nCORRECT IMPLEMENTATION NEEDED:\n1. Extract non-zero values from input (appears to be along specific diagonals)\n2. Store unique non-zero values in order of discovery\n3. Output grid: each position [i][j] gets value based on (i+j)%3 index into the value list\n4. Function MUST be named \"map\" (not \"transform\")\n\nACTION PLAN:\n1. Complete merge of branch2 into branch1\n2. Resolve algo.py conflict by implementing CORRECT pattern (period-3 with proper extraction logic)\n3. Test against all 3 examples to verify before claiming completion\n</memory_context>",
+      "request_ready_event_id": "evt_3f02439d771e455fa82d97a8f4d42b9c",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b187933a4b0a43dc",
+      "actor_attempt": 29,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe task is nearly complete. The agent has:\n1. Successfully created branch1 and branch2 from the bundles ✓\n2. Identified the correct algorithm pattern (collect non-zero values with (i+j)%3, tile output using same modulo) ✓\n3. Written the corrected algo.py with the map function ✓\n4. Verified all 3 examples pass perfectly ✓\n\n**CRITICAL NEXT STEP**: The agent must create a merge commit in the git repository to formally complete the merge of branch2 into branch1. The files are currently in the working directory but the git merge is not yet committed. The agent should use Dulwich to:\n- Stage all files (.DS_Store, algo.py, requirements.txt, utils.py, SOLUTION_NOTES.txt)\n- Create a merge commit with both branch1 and branch2 as parents\n- Update branch1 ref to point to the new merge commit\n\nThis is the final requirement to satisfy \"merged them\" in the task success criteria. All functional requirements are met - the merge just needs to be recorded in git history.\n</memory_context>",
+      "request_ready_event_id": "evt_d5ce121978824a55868eebbe3b8582eb",
+      "provider_attempt": true
+    }
+  ]
+}
