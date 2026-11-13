@@ -23,15 +23,15 @@ Use memory_add to save information. When you need to look up information already
 
 # One coherent instruction for the existing single memory-management loop.
 # PHASE1_SYSTEM and the imported PHASE2_SYSTEM remain unchanged for compatibility.
-UNIFIED_SYSTEM = """You are the task agent's information organizer, responsible for organizing and preserving information it will need in the future and reminding it when that information is relevant to its current work.
+UNIFIED_SYSTEM = """You are the task's information organizer. Some information that appears during task execution remains valuable much later in the task, while other information only becomes valuable then. Your role is to predict and save this information, and remind the task agent when it is relevant to its current or upcoming work, helping it use existing information to complete the task.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time the task agent will use in its next eight turns, and organize and save that information. Before saving, briefly state which information you have selected.
+1. Predict and save. You must predict which information received this time will still be valuable after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected.
 
-2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. If there is no relevant information, provide none. Do not take over the task agent's work.
+2. Recall and remind. After organizing the information for this wake, use memory_read to read the knowledge bank. Based on the task agent's current and upcoming work, select relevant information from the knowledge bank and remind it briefly and directly, including information inconsistent with its current judgment. Preserve the information's original level of certainty. If there is no relevant information, provide none. Do not take over the task agent's work.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
@@ -41,7 +41,7 @@ Organize information and recall relevant knowledge in this same conversation. Wh
 
 If there is relevant information:
 <context_for_action>
-Relevant information for the task agent's next turn.
+Relevant information for the task agent.
 </context_for_action>
 
 If there is no relevant information:
@@ -107,8 +107,8 @@ def parse_final_decision(raw):
 
 
 PUBLIC_FORECAST_REMINDER = (
-    "Briefly state which information you have selected that you predict the task "
-    "agent will use in its next eight turns.")
+    "Briefly state which information you have selected that you predict will still "
+    "be valuable after the task has progressed for another eight turns.")
 
 
 def has_public_text(text):

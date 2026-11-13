@@ -13,15 +13,15 @@ from memory_agent.memory import read_context_predictive_memory_agent as module
 from memory_agent.memory.read_context_predictive_memory_agent import (
     BANK_TOOLS, PUBLIC_FORECAST_REMINDER, UNIFIED_SYSTEM)
 
-EXPECTED_SYSTEM = '''You are the task agent's information organizer, responsible for organizing and preserving information it will need in the future and reminding it when that information is relevant to its current work.
+EXPECTED_SYSTEM = '''You are the task's information organizer. Some information that appears during task execution remains valuable much later in the task, while other information only becomes valuable then. Your role is to predict and save this information, and remind the task agent when it is relevant to its current or upcoming work, helping it use existing information to complete the task.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time the task agent will use in its next eight turns, and organize and save that information. Before saving, briefly state which information you have selected.
+1. Predict and save. You must predict which information received this time will still be valuable after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected.
 
-2. Recall relevant information. On every wake, use memory_read with bank_id="knowledge" to read the knowledge bank. From the returned information, select what is relevant to the task agent's current work and provide it briefly and directly for its next turn. If there is no relevant information, provide none. Do not take over the task agent's work.
+2. Recall and remind. After organizing the information for this wake, use memory_read to read the knowledge bank. Based on the task agent's current and upcoming work, select relevant information from the knowledge bank and remind it briefly and directly, including information inconsistent with its current judgment. Preserve the information's original level of certainty. If there is no relevant information, provide none. Do not take over the task agent's work.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
@@ -31,7 +31,7 @@ Organize information and recall relevant knowledge in this same conversation. Wh
 
 If there is relevant information:
 <context_for_action>
-Relevant information for the task agent's next turn.
+Relevant information for the task agent.
 </context_for_action>
 
 If there is no relevant information:
@@ -111,7 +111,7 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     assert 'private-fixture' not in str(payload)
 
 
-EXPECTED_PUBLIC_REMINDER = 'Briefly state which information you have selected that you predict the task agent will use in its next eight turns.'
+EXPECTED_PUBLIC_REMINDER = 'Briefly state which information you have selected that you predict will still be valuable after the task has progressed for another eight turns.'
 
 
 def test_public_reminder_matches_information_forecast():
@@ -120,10 +120,10 @@ def test_public_reminder_matches_information_forecast():
     assert "do not disclose private reasoning" not in UNIFIED_SYSTEM
     for text in [UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER]:
         assert 'problems or decisions' not in text
-    assert 'will use in its next eight turns' in PUBLIC_FORECAST_REMINDER
+    assert 'will still be valuable after the task has progressed for another eight turns' in PUBLIC_FORECAST_REMINDER
     assert 'briefly state which information you have selected' in UNIFIED_SYSTEM
     assert 'information received this time' in UNIFIED_SYSTEM
-    assert 'the task agent will use in its next eight turns' in UNIFIED_SYSTEM
+    assert 'will still be valuable after the task has progressed for another eight turns' in UNIFIED_SYSTEM
     assert 'the task agent may use' not in UNIFIED_SYSTEM
     assert 'four turns' not in UNIFIED_SYSTEM
     assert 'four turns' not in PUBLIC_FORECAST_REMINDER
@@ -140,11 +140,11 @@ def test_completion_tags_remain_but_long_protocol_guidance_is_removed():
 
 def test_forecast_window_does_not_delay_related_reminders():
     selection = UNIFIED_SYSTEM.split('1. Predict and save.', 1)[1].split('2. Recall', 1)[0]
-    assert 'will use in its next eight turns' in selection
+    assert 'will still be valuable after the task has progressed for another eight turns' in selection
     assert 'organize and save that information' in selection
     reminder = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
-    assert "select what is relevant to the task agent's current work" in reminder
-    assert 'On every wake, use memory_read with bank_id="knowledge"' in reminder
+    assert "task agent's current and upcoming work" in reminder
+    assert 'After organizing the information for this wake, use memory_read' in reminder
     assert 'If there is no relevant information, provide none.' in reminder
     assert 'six task-agent turns' not in reminder
     for removed in ['already visible', 'taken it into account', 'Default to no intervention']:
@@ -153,8 +153,8 @@ def test_forecast_window_does_not_delay_related_reminders():
 
 def test_information_organizer_role_and_separate_tool_guidance():
     role = UNIFIED_SYSTEM.split('\n\n', 1)[0]
-    assert "task agent's information organizer" in role
-    assert 'relevant to its current work' in role
+    assert "task's information organizer" in role
+    assert 'relevant to its current or upcoming work' in role
     assert 'useful now' not in role
     assert '## Tools\n- memory_add:' in UNIFIED_SYSTEM
     assert '- memory_read: Read all information currently saved' in UNIFIED_SYSTEM
@@ -168,13 +168,30 @@ def test_simple_selection_replaces_first_use_and_certainty_requirements():
     assert 'Before saving, briefly state which information you have selected.' in selection
     for removed in ['first use', 'only after', 'confirmed findings', 'tentative inferences',
                     'level of certainty', 'levels of certainty', 'future uses', 'six task-agent']:
-        assert removed not in UNIFIED_SYSTEM
+        assert removed not in selection
         assert removed not in PUBLIC_FORECAST_REMINDER
     assert 'Organize information and recall relevant knowledge in this same conversation.' in UNIFIED_SYSTEM
 
 
 def test_recall_and_tool_contract_remain_current_work_based():
     reminder = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
-    assert 'On every wake, use memory_read with bank_id="knowledge"' in reminder
-    assert "select what is relevant to the task agent's current work" in reminder
+    assert 'After organizing the information for this wake, use memory_read' in reminder
+    assert "task agent's current and upcoming work" in reminder
     assert 'next eight' not in reminder
+
+
+def test_recall_preserves_certainty_and_includes_conflicting_information():
+    recall = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
+    assert "including information inconsistent with its current judgment" in recall
+    assert "Preserve the information's original level of certainty." in recall
+    assert 'After organizing the information for this wake, use memory_read' in recall
+    assert 'If you saved' not in recall
+    assert 'eight' not in recall
+
+
+def test_role_covers_persistent_and_delayed_value_without_first_use_gate():
+    role = UNIFIED_SYSTEM.split('\n\n', 1)[0]
+    assert 'remains valuable much later in the task' in role
+    assert 'other information only becomes valuable then' in role
+    assert 'first' not in UNIFIED_SYSTEM
+    assert 'next eight' not in UNIFIED_SYSTEM
