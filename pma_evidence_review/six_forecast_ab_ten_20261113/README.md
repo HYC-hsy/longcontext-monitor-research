@@ -1,0 +1,24 @@
+# Six-turn forecast A/B: ten real tasks (2026-11-13)
+
+This folder is a **redacted visible projection**, not raw HTTP bytes or a restorable private run directory. Private originals and complete profiles remain on the Windows host. The fixed A execution SHA is `4eeb996767bcb6096037bf743256a338be33d8bb`; B is `0f16e29ef02d35e730d43afde9cf10eec2d0ef79`. Dataset `2fd12b88aafdd04a52c298e3940bcb189f9766d6`, Harbor `459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`. See `PMA_SIX_FORECAST_COMPARISON_20261112.md` in fixed B for full prompt text.
+
+Ten slots ran in task order, A then B, each once. All Task runs, native evaluations and owned-resource cleanup completed. The source worktrees remained detached, clean and fixed; no production code, prompts, tools or outputs were edited for this run. A/B source diff has one production sentence, A-only `Save only confirmed findings.`; both otherwise use six-turn first-use prediction, four-step wakes and the same recall certainty instruction.
+
+## Navigation
+
+- `PMA_SIX_FORECAST_AB_TEN_REAL_20261113.zip`: complete selected visible Task/PMA trace, operations, receipts, bank, evaluation summaries, resource receipts, plans/identity, console and offline logs. Its internal `PUBLIC_PROJECTION_NOTICE.txt` states exclusions.
+- `PMA_SIX_FORECAST_AB_TEN_REAL_20261113.index.json`: each ZIP member's original size/SHA-256 and public-projection size/SHA-256, plus ZIP identity. The source hashes identify the retained private originals; they do **not** claim byte equality with the redacted projection.
+- `*.facts.json`: run and native counts, tool/usage counts. `*.request_check.json`: actual logged system/tool/tag checks. `*.wake_index.json`: each wake, boundary and reminder-to-Task-provider attempt link. `*.write_timeline.json`: all 45 proposed writes, same/prior public text and success receipt. `*.reminder_timeline.json`: all 15 generated reminder texts and subsequent provider-request identities.
+- `RESULTS.md`, `WAKE_REVIEW.md`, `WRITE_AUDIT.md`: run table, every-wake navigation and chronological pre-save/uncertainty audit. No hidden test names or assertions are used to invent failure causes.
+
+## Environment and checks
+
+Actual Python: `E:/LongContext/bench_runtime/m4/harbor-env/Scripts/python.exe` (Python 3.13.14); Docker engine 29.6.1. Each fixed checkout passed source identity in `experiment_runner plan`/`prepare`, with fresh task-specific manifests and claims. Every `archive/runtime_policy_effective.json` receipt showed effective agent/task/outer limit `null` (uncapped) and official verifier timeout retained; setup/build and individual request limits were not removed. Task profile SHA-256 `ed09a811b654b83097bee77942704eae2539d67291bf55aa34476692081ff02e`; manager profile SHA-256 `c568aac2b3042f852537a7302bae48e756bbaea74f732ff7e985298d7b2a98e6`. Config declares Task Claude Opus 4.8 and manager Claude Opus 5, but returned manager model IDs were absent, so service-side identity is `unknown`. Profile hashes were equal to the preceding f637 run; the profiles themselves are not public.
+
+Target-environment zero-model checks: A and B each `164 passed, 6 deselected` in the final focused suite. A broader first run in each had `164 passed, 5 deselected, 1 failed`: the failed source AST assertion pinned an out-of-date expected digest (`f073...`), while masked production AST was `3bf98...` for A, B **and the fixed f637 parent**. The failure log is retained; no test or source was changed to hide it. Initial collection also required adding the fixed source's stage root to `PYTHONPATH` (`responses_memory_llm` import); that was an environment-path correction, not a source patch. These checks are targeted, not a claim that the entire suite is green. Published candidates reported 150 targeted checks each; the local selection was broader and is reported under its actual counts.
+
+## Public handling and limits
+
+The archive includes complete selected visible request/response/event logs, not just favorable excerpts. Recursive JSON field projection excludes private thinking/reasoning blocks and signature fields; text secret patterns exclude credentials and private endpoints. Full profile files, hidden verifier scripts/test bodies and unrelated task files are not selected. Ordinary model `thinking` **configuration fields** are retained when present; private thinking content is excluded. Native summary counts/rewards are public, but hidden test names/assertions/stdout are omitted. Missing organizer usage/model response IDs, provider physical attempts and total dollar cost are marked `unknown`; no estimates are inferred from characters or logical calls.
+
+The real execution input was not altered for redaction. A model public explanation is not its private chain of thought. Generated/queued reminder, actual provider-request delivery, Task uptake and causal effect are distinct claims; the indexes explicitly support only the observed stages.

@@ -1,0 +1,30 @@
+# Six-turn prediction and saving strategy: ten real tasks
+
+A `4eeb996767bcb6096037bf743256a338be33d8bb` only adds the confirmed-only sentence to the production system; B `0f16e29ef02d35e730d43afde9cf10eec2d0ef79` permits tentative information while retaining its certainty. Both have six-turn first-use forecasting and four-step wakes. Dataset, Harbor, same Task/manager profile hashes, task-specific native evaluator and uncapped Task policy were checked as described in `README.md` and the ZIP. Every row below has `disposition=completed`, a real native result and `cleanup_confirmed=true`.
+
+| Task | Arm | run_id | Task steps | Wakes / manager responses | Successful reads / writes | Delivered reminders | Native tests | Reward | Wall time |
+|---|:---:|---|---:|---:|---:|---:|---:|---:|---:|
+| kv-store-grpc | A | `pma-3a1ad3a7cc68486a` | 12 | 3 / 27 | 21 / 3 | 0 | 7/7 | 1 | 4.8 min |
+| kv-store-grpc | B | `pma-0503695bea4746dd` | 12 | 3 / 10 | 4 / 3 | 2 | 7/7 | 1 | 4.5 min |
+| reshard-c4-data | A | `pma-fb2ca4b77a464d98` | 20 | 5 / 23 | 14 / 4 | 4 | 0/1 | 0 | 8.1 min |
+| reshard-c4-data | B | `pma-754e44ca31f74d81` | 20 | 5 / 19 | 9 / 5 | 0 | 0/1 | 0 | 8.5 min |
+| rstan-to-pystan | A | `pma-3d5249a2f75b489e` | 25 | 7 / 34 | 21 / 5 | 3 | 6/6 | 1 | 34.6 min |
+| rstan-to-pystan | B | `pma-dfb10f1e358b4889` | 28 | 7 / 30 | 13 / 10 | 4 | 6/6 | 1 | 36.4 min |
+| largest-eigenval | A | `pma-4a6f78829fe04c72` | 18 | 5 / 15 | 5 / 4 | 2 | 3/3 | 1 | 6.6 min |
+| largest-eigenval | B | `pma-39883482cc7e4fa2` | 28 | 7 / 27 | 11 / 8 | 0 | 2/3 | 0 | 8.8 min |
+| filter-js-from-html | A | `pma-479244ca4cad4f9f` | 7 | 2 / 6 | 2 / 2 | 0 | 0/2 | 0 | 6.7 min |
+| filter-js-from-html | B | `pma-02ea34edee734a80` | 2 | 1 / 4 | 1 / 1 | 0 | 0/2 | 0 | 6.5 min |
+
+Totals: A 82 Task steps, 22 wakes, 105 manager responses, 63 successful reads, 18 successful writes, **9** delivered reminders, native reward 1 on **3/5** tasks. B 90 steps, 23 wakes, 90 manager responses, 38 reads, 27 writes, **6** delivered reminders, reward 1 on **2/5**. All 15 generated reminders had a matching later Task provider attempt; generation alone was not used as delivery evidence. A's KV initialization repeated 19 reads, and RStan A initialization 11; B was lower in those instances, but differing model trajectories and error recovery preclude a causal cost claim. Manager usage/model IDs were not returned, so manager tokens, provider attempt count and total cost remain `unknown`; Task usage fields are in `facts.json`.
+
+## Paired behavioral observations
+
+- **KV:** A W4 inferred underscore generated filenames from a successful protoc command and stored them as generated fact before the file listing; W5 later confirmed them. B W1 stored expected hyphen filenames as if requirements, then B W8 corrected to actual underscores and kept the background server's status *unclear*. B's two reminders were delivered at Task attempts 1 and 9; A had none. Both passed 7/7. The initial task specification reminder was not necessarily needed for success.
+- **Reshard:** A saved locally observed flat-sample round-trip and later 32 MB split; B saved separate flat, nested and remaining large-file test status. At B W16 the public and stored text explicitly said the large-file path had **not** been exercised, a useful scope distinction. A delivered four reminders, B none; both failed the native 1-test result. This does not identify the hidden failure cause or prove reminder harm/benefit.
+- **RStan:** A W12 saved a certain “root cause” that the script was saving raw samples, before checking PyStan array shapes; its W13 delivered reminder repeated that diagnosis. A W16/W20 wrote plans for shape tests despite the confirmed-only rule. B W20 recorded several alternatives, explicitly marked a wrong-variable idea as a hypothesis; its W21 reminder still used “suggesting” and asked for shape checks. B W24 then saved observed `(3, 2000)` shapes and the needed axis correction. Both ultimately passed 6/6, but different paths and 25 vs 28 steps do not prove either note caused the correction.
+- **Eigen:** B W4 preserved an untested `scipy.sparse.linalg.eigs` approach as tentative; W12/W16 kept likely causes for a power-iteration failure and revised them after additional evidence. B W20 nevertheless generalized one complex-eigenpair failure to a blanket impossibility claim, and W24 promoted a local speed benchmark to “CONFIRMED SOLUTION” before full `eval.py`; its later write in the same wake restored a pending-evaluation caveat. B generated no reminders, so the tentative bank entries' certainty at delivery is untested. A had two delivered local benchmark reminders. Native outcomes were A 3/3, B 2/3; causality is not established.
+- **HTML:** A saw seven Task steps and saved original requirements plus details of a locally executed regex sanitizer, while noting output still needed verification. B ended after two Task steps and saved only original requirements. Neither delivered a reminder; both failed 2/2. The shorter B trajectory leaves little follow-up window, not a failed six-turn forecast verdict.
+
+The 45 writes are individually indexed and classified in `WRITE_AUDIT.md`; all 45 wakes, including no-save/no-reminder cases, are in `WAKE_REVIEW.md`. Confirmed-source claims, actual operation receipts, memory persistence and native evaluation are separate evidence layers. Three rejected unavailable-tool calls appear in the manager traces (RStan A `code_run`, Eigen A `$ACTION_TYPE`, Eigen B `$FUNCTION_NAME`), plus HTML B `file_write`; they were **not executed** by the host. These were recovered within the runs; they are not successful bank reads/writes.
+
+Prior f637 (ten-turn) reward vector was `1,0,0,1,0`; A was `1,0,1,1,0`, B `1,0,1,0,0`. That history differs in horizon and wording; A/B also followed distinct Task paths and fixed A-before-B order. The figures are exploratory observations, not a statistical or isolated causal estimate of saving policy. Failed native tests do not automatically make every saved statement false, and passing does not certify every memory entry.
