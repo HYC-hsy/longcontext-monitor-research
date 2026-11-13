@@ -1,0 +1,108 @@
+{
+  "reminders": [
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-1ee16c9a7b0f40ef",
+      "actor_attempt": 9,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe task agent is currently blocked because PyStan cannot compile Stan models without a C++ compiler. The agent needs to install build-essential (or gcc/g++) before it can proceed with running the Python script.\n\nKey context:\n- Error: \"command 'x86_64-linux-gnu-gcc' failed: No such file or directory\"\n- Python script is already created at /app/pystan_analysis.py\n- All Python dependencies are installed (pandas, numpy, pystan==3.10.0)\n- Next step: Install build-essential, then rerun the script\n</memory_context>",
+      "request_ready_event_id": "evt_b60df05c59f5442782c0cbdc6f68a5e1",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-1ee16c9a7b0f40ef",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical context for current fix:**\n\nStan model compiled successfully (54.2s). The error at line 151 is due to PyStan 3.10.0 API difference:\n- R uses `init_r=0.1` (scalar applied to all chains)\n- PyStan 3.10.0 `init` parameter expects a list structure for multiple chains, not a single float\n\n**Fix options:**\n1. Remove the `init` parameter entirely (let PyStan use default initialization)\n2. Convert to list format: `init=[0.1] * num_chains` for uniform random initialization range\n3. Use string format: `init=\"random\"` with separate seed control\n\nThe R script's `init_r=0.1` controls the random initialization range. In PyStan 3.10.0, this should likely be removed or converted to a proper list/string format.\n</memory_context>",
+      "request_ready_event_id": "evt_a4313ff9dadf4347ace80a52408445c3",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-1ee16c9a7b0f40ef",
+      "actor_attempt": 17,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical context for fixing sampling parameters:**\n\nThe R script uses these sampling parameters that must be functionally matched:\n- chains=4, iter=2000, warmup=1000, thin=2, seed=1\n- Control parameters: adapt_delta=0.93, max_treedepth=14, adapt_gamma=0.05, adapt_kappa=0.75, adapt_t0=10, adapt_init_buffer=100, adapt_term_buffer=50, adapt_window=25\n\n**Known PyStan 3.10.0 incompatibilities:**\n- `adapt_delta`, `adapt_engaged`, `max_treedepth`, `seed` are rejected as \"Unknown field\"\n- `init=0.1` (scalar) caused TypeError - needs list/dict or removal\n\n**Task requirement:** Use functionally equivalent hyperparameters for posterior sampling - the converted script should do exactly the same posterior sampling as the original R script.\n\nThe agent needs to check PyStan 3.10.0 documentation or source code to find the correct parameter names that correspond to R's control parameters.\n</memory_context>",
+      "request_ready_event_id": "evt_8c2262a526fd4230aed7d5c36086dcd1",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-1ee16c9a7b0f40ef",
+      "actor_attempt": 21,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical information for the agent's current work:**\n\nThe agent has successfully identified the correct PyStan 3.10.0 parameter names through testing. The script at /app/pystan_analysis.py needs to be updated with these correct parameters:\n\n**Correct parameter mapping:**\n- Use `num_chains=4` (not chains)\n- Use `num_samples=1000` (NOT iter=2000; in R iter includes warmup, so actual samples = 2000-1000=1000)\n- Use `num_warmup=1000` (not warmup)\n- Use `num_thin=2` (NOT thin)\n- Use `delta=0.93` (NOT adapt_delta)\n- Use `max_depth=14` (NOT max_treedepth)\n- `random_seed=1` is already correctly set in stan.build()\n- Remove the `init` parameter (it was causing errors)\n\n**Other R control parameters** (adapt_gamma, adapt_kappa, adapt_t0, adapt_init_buffer, adapt_term_buffer, adapt_window):\nThe agent should test if these have PyStan 3 equivalents, or proceed without them if they're not critical (they may use sensible defaults).\n\n**Next action:** Update /app/pystan_analysis.py with the correct parameter names and run the script to complete the posterior sampling and save results.\n</memory_context>",
+      "request_ready_event_id": "evt_6f0c054df3164a2eae633c5c18d30716",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-1ee16c9a7b0f40ef",
+      "actor_attempt": 25,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical Issue - Output Format Error:**\n\nThe task agent has successfully completed posterior sampling, but there's a **data dimension mismatch** in the output files:\n\n**Problem:** \n- rho_est.csv contains 2000 lines (all samples)\n- beta_est.csv contains 2000 lines (all samples)\n\n**Required:**\n- rho_est.csv: exactly 3 numbers, one per row (posterior means of rho vector with dimension 3)\n- beta_est.csv: exactly 3 numbers, one per row (posterior means of beta vector with dimension 3)\n\n**Root Cause:**\nLooking at the code (lines 170-183), the script correctly computes means:\n- `rho_mean = np.mean(rho_samples, axis=0)` - averages across samples\n- `beta_mean = np.mean(beta_samples, axis=0)` - averages across samples\n\nHowever, `rho_samples` and `beta_samples` likely have shape `(2000, D)` where D is NOT 3 but a much larger dimension (possibly 2000). The task specification states rho and beta should be 3-dimensional vectors based on the original R script where P=3.\n\n**Action needed:**\nThe agent should check the actual dimensions of rho and beta parameters in the Stan model and the meta_public.json file to understand why there are 2000 elements instead of 3. The H matrix construction uses `cbind(1, train_X[,1], train_X[,2])` which creates 3 columns (intercept + 2 features), so beta should indeed be 3-dimensional. The confusion likely stems from how the parameters are extracted from the fit object.\n</memory_context>",
+      "request_ready_event_id": "evt_2a8b60d19dd44210bfc6952d37d4420e",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-1ee16c9a7b0f40ef",
+      "actor_attempt": 29,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent needs to fix the data loading issue immediately. The critical problem discovered:\n\n**ROOT CAUSE OF DIMENSION MISMATCH:**\n- train_X.csv and test_X.csv have header rows (\"x1\", \"x2\", \"x3\") being read as data\n- Current code: `pd.read_csv('/app/train_X.csv').values` reads header as first row → 201 rows instead of 200\n- R script uses only first 2 columns: `train_X[,1]` and `train_X[,2]`\n- Correct dimensions: D=2 (not 3), N=200 (not 201)\n\n**EXPECTED PARAMETER DIMENSIONS:**\n- rho: length 2 (one per input dimension D=2)\n- beta: length 3 (intercept + 2 features)\n\n**REQUIRED FIXES IN /app/pystan_analysis.py:**\n1. Line 110-111: Add `header=0` to pd.read_csv() for train_X and test_X to properly handle headers\n2. Verify D is set to 2 (not computed from train_X.shape which would give 3 with header row)\n3. Only use first 2 columns of data for X matrices (train_X[:, :2])\n\n**OUTPUT FILE REQUIREMENTS (from task spec):**\n- rho_est.csv: 3 numbers one per row → BUT should be 2 numbers (dimension D=2)\n- beta_est.csv: 3 numbers one per row → Correct (intercept + D=2 features)\n\nNote: Task spec says \"rho_est.csv: posterior means of rho vector (3 numbers, one per row)\" but this appears to be an error in the spec. The actual R script with D=2 produces rho of length 2. The agent should follow the R script behavior (D=2, rho length 2).\n</memory_context>",
+      "request_ready_event_id": "evt_f79c0967948240709d9b9e20303b7974",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-1ee16c9a7b0f40ef",
+      "actor_attempt": 33,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**CRITICAL FIX NEEDED - Posterior Mean Extraction**\n\nYour test just revealed the root cause: PyStan 3 fit object shape is `(parameter_dimension, num_samples)`:\n- `fit['rho'].shape = (2, num_samples)` - rows are dimensions, columns are samples\n- `fit['beta'].shape = (3, num_samples)` - rows are dimensions, columns are samples\n\n**Current bug in /app/pystan_analysis.py:** The script is likely doing `fit['rho'].mean()` or saving entire arrays, which flattens all 2000 samples.\n\n**Correct extraction for output files:**\n\n\n**Expected output dimensions:**\n- alpha_est.csv: 1 line (single value)\n- sigma_est.csv: 1 line (single value)\n- rho_est.csv: 2 lines (D=2 dimensions, despite task spec saying 3)\n- beta_est.csv: 3 lines (P=3 dimensions)\n\nNote: Task spec incorrectly states \"rho_est.csv: posterior means of rho vector (3 numbers)\" but the R script uses D=2, so rho has length 2.\n</memory_context>",
+      "request_ready_event_id": "evt_b8a421f773b84389ae46bd51895debbc",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-36d5a29b869d4a91",
+      "actor_attempt": 1,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nKey task requirements to keep in mind:\n\n**Git workflow:**\n- Fetch bundle1.bundle -> branch1, bundle2.bundle -> branch2 (use HEAD ref, inspect if ambiguous)\n- Merge branch2 INTO branch1 (branch1 is the base branch)\n\n**Critical deliverable:**\n- /app/repo/algo.py MUST exist after merge\n- Must contain function named \"map\" with signature: map(2D_array_of_ints) -> 2D_array\n- Mapping logic must be inferred from /app/examples.json\n- Must generalize to hidden test cases (not just reproduce examples)\n- Verify against ALL examples in /app/examples.json\n\n**Success criteria:**\nBoth branches created from bundles, successfully merged, algo.py present with correct generalizable map function.\n</memory_context>",
+      "request_ready_event_id": "evt_2c9923691b424eb8b2ddc8e5fab233cc",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-36d5a29b869d4a91",
+      "actor_attempt": 5,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Current blocker:** Git installation failing due to apt-get lock held by process 1551. Need to resolve this before proceeding with bundle extraction.\n\n**Pattern insight for later implementation:**\nThe examples.json analysis suggests the map function should:\n- Extract non-zero values from input diagonals\n- Create a repeating tile pattern in the output\n- Examples show patterns like [1,2,4] → tiled [2,4,1], [2,8,3] → tiled [2,8,3], etc.\n\n**Next steps after git install:**\n1. Initialize git repo at /app/repo\n2. Fetch bundle1.bundle → branch1, bundle2.bundle → branch2\n3. Merge branch2 into branch1\n4. Implement algo.py with map function based on pattern analysis\n5. Verify against all examples in examples.json\n</memory_context>",
+      "request_ready_event_id": "evt_3f577af426ec4b52880924df097c5d58",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-36d5a29b869d4a91",
+      "actor_attempt": 9,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical information for the current merge operation:**\n\nThe agent is about to merge branch2 into branch1. Based on the discovered branch contents:\n\n1. **Merge conflict is certain**: Both branches have algo.py with different implementations\n   - branch1's algo.py: unknown content (462 bytes, has utils.py)\n   - branch2's algo.py: contains function named \"transform\" (414 bytes, has requirements.txt)\n\n2. **Function naming issue**: branch2 uses \"transform\" but task requires \"map\" - this must be corrected during conflict resolution\n\n3. **File reconciliation needed**: \n   - branch1 has utils.py (not in branch2)\n   - branch2 has requirements.txt and .DS_Store (not in branch1)\n   - All should be preserved in final merge\n\n4. **Verification required**: After merge, must read /app/examples.json to verify the pattern implementation matches the expected input→output mapping, then test against all examples\n\n5. **Algorithm hint from branch2**: Uses modulo-3 operations with (i-j)%3 and (i+j)%3, which may relate to the diagonal pattern extraction mentioned in earlier analysis\n</memory_context>",
+      "request_ready_event_id": "evt_b3e961417a7d470687b58529ae45d92b",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-36d5a29b869d4a91",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**REMINDER: Critical information for current merge conflict resolution:**\n\nThe agent is currently resolving the merge conflict in algo.py. Key context:\n\n1. **Both branches have different algorithms:**\n   - branch1: map function with (i+j)%4 pattern (works with 2D lists)\n   - branch2: transform function with (i-j)%3 extraction, (i+j)%3 application (works with numpy arrays)\n\n2. **Task requirements mandate:**\n   - Function MUST be named \"map\" (not \"transform\")\n   - Must accept 2D array of integers and return 2D array\n   - Must match the pattern in /app/examples.json\n\n3. **Pattern hypothesis from earlier analysis:**\n   - Examples show diagonal extraction with values like [1,2,4], [2,8,3], [8,3,4]\n   - Output shows tiled repeating patterns\n   - All test cases use 7x7 arrays\n\n4. **Current status:**\n   - Merge conflict present in algo.py (both modified)\n   - requirements.txt and .DS_Store already staged\n   - Need to resolve conflict, then verify against /app/examples.json\n\n5. **Next immediate steps:**\n   - Read the conflicted algo.py to see merge markers\n   - Analyze /app/examples.json to determine correct modulo value (3 vs 4)\n   - Resolve conflict with correct algorithm\n   - Ensure function is named \"map\"\n   - Test against all examples\n\n**Critical decision point:** Neither mod 3 nor mod 4 may be correct - must verify against actual examples.json data before committing the merge resolution.\n</memory_context>",
+      "request_ready_event_id": "evt_6eb202812a8540aaa44e4345a4c01210",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-36d5a29b869d4a91",
+      "actor_attempt": 21,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical Context for Algorithm Verification:**\n\nYour git merge task is complete:\n- ✓ branch1 and branch2 created from bundles\n- ✓ Merged with conflicts resolved\n- ✓ algo.py exists with \"map\" function\n\n**Current Algorithm Issue:**\nThe algo.py implementation uses (i-j)%3 for extraction and (i+j)%3 for output, but manual analysis shows this produces incorrect dictionary values.\n\n**Target Pattern (from examples.json):**\n- Expected output: [2, 4, 1] repeating pattern\n- Required: d[0]=2, d[1]=4, d[2]=1\n- Input has non-zero values: 1, 2, 4 on diagonals\n\n**Python is now available** - you can test the current implementation and fix the extraction logic to match the expected pattern. Consider whether the issue is:\n1. Wrong extraction formula (i-j)%3\n2. Need to filter only non-zero values\n3. Need different scan order or first/last value logic\n4. Need different key mapping\n\nTest current algo.py first, then fix based on actual vs expected results.\n</memory_context>",
+      "request_ready_event_id": "evt_62ca7b6e5b1e435d85b0d7c4c3881efa",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-36d5a29b869d4a91",
+      "actor_attempt": 25,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical reminder for the task agent:**\n\nYou've successfully completed the git merge (branch1 and branch2 are merged). The algo.py file exists with the \"map\" function, but it has a confirmed bug.\n\n**The exact bug found through testing:**\n- Line 30 in algo.py: `d[key] = c` stores ALL values including zeros\n- This causes zeros to overwrite non-zero values as the scan progresses\n- Test confirmed: d[0]=0, d[1]=0, d[2]=4 (wrong) instead of d[0]=2, d[1]=4, d[2]=1 (correct)\n\n**The fix is simple and confirmed:**\nChange line 30 from `d[key] = c` to:\n\n\nThis will prevent zeros from overwriting the extracted non-zero values. After this fix, test against all examples in /app/examples.json to verify correctness.\n</memory_context>",
+      "request_ready_event_id": "evt_cbce07afb0a54c6c8cb6839b4b65a103",
+      "provider_attempt": true
+    }
+  ]
+}
