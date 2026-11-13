@@ -49,6 +49,8 @@ def test_real_loop_payload_and_multiple_verbatim_saves():
 
 def test_exact_parent_source_except_two_description_assignments():
     source = Path(module.__file__).read_text()
+    from test_complete_save_prompt import restore_parent_prompt
+    source = restore_parent_prompt(source)
     tree = ast.parse(source)
     assignments = [node for node in tree.body if isinstance(node, ast.Assign)
         and ast.unparse(node.targets[0]) in [

@@ -6,10 +6,10 @@ from test_remind_first_loop import make, read, decision, done, run
 
 OLD = "After receiving its result, based on the task agent's current and upcoming work, decide whether to remind it of information in that bank."
 NEW = 'After receiving its result, consider both the conversation context and the knowledge bank to decide whether to remind the task agent, and what to remind it of, based on its current and upcoming work.'
-PARENT_SYSTEM_SHA256 = '688f3f0205543ed9145fb3ade1472c11b5cf120935f1e2c2a8abe8c85eb5cb13'
+PARENT_SYSTEM_SHA256 = 'de71ca218c4e65f346b4b660214a43d55b2cee89a302e11ba75206254c5e1847'
 
 
-def test_approved_system_is_unchanged_by_engineering_repair():
+def test_approved_system_has_complete_save_guidance_and_same_reminder():
     assert module.REMIND_FIRST_SYSTEM.count(NEW) == 1
     assert OLD not in module.REMIND_FIRST_SYSTEM
     assert hashlib.sha256(module.REMIND_FIRST_SYSTEM.encode()).hexdigest() == PARENT_SYSTEM_SHA256

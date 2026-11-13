@@ -48,6 +48,9 @@ def test_exact_approved_coherent_system():
 
 
 def nonprompt_digest(source):
+    # Normalize the authorized remind-first system-only edit before the older guard.
+    from test_complete_save_prompt import restore_parent_prompt
+    source = restore_parent_prompt(source)
     # Runtime AST pinned after the authorized memory_add description-only update.
     # Schemas, recovery, input wrappers and the tool loop remain protected.
     tree = ast.parse(source)

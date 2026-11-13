@@ -395,10 +395,10 @@ Information to remind the task agent of.
 </context_for_action>
 <no_intervention/>
 
-2. Predict and save. When the program advances to this step, you must predict which information received this time will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected. The reminder decision has already been recorded and is not changed in this step. Use tools as needed; when finished, reply in ordinary text without a tool call. No completion tag is required. If nothing needs saving, say so in ordinary text.
+2. Predict and save. You must predict which information received this time will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. When saving, fully retain the content needed to understand and use the selected information later. Before saving, briefly state which information you have selected.
 
 ## Tools
-- memory_add: Save information in the knowledge bank; available during step 2.
+- memory_add: Save information in the knowledge bank.
 - memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
 """
 
