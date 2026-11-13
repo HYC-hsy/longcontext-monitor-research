@@ -19,8 +19,13 @@ async def exercise(fail, root, monkeypatch):
         def construct(*a,**kw):
             agent=original_construct(*a,**kw)
             async def failing(*,prompt,**kwargs):
-                if prompt.startswith('<task_description>\n'):
-                    return SimpleNamespace(content='',tool_calls=[SimpleNamespace(id='saved',function=SimpleNamespace(name='memory_add',arguments={'content':'partially saved'}))])
+                manager=agent._memory_agent
+                if manager._wake_stage=='remind':
+                    if not manager._reminder_bank_read:
+                        return SimpleNamespace(content='Read.',tool_calls=[SimpleNamespace(id='read',function=SimpleNamespace(name='memory_read',arguments={'bank_id':'knowledge'}))])
+                    return SimpleNamespace(content='<context_for_action>Never deliver on failure.</context_for_action>',tool_calls=[])
+                if not any(op.action=='add' for op in manager._phase1_operations):
+                    return SimpleNamespace(content='Save.',tool_calls=[SimpleNamespace(id='saved',function=SimpleNamespace(name='memory_add',arguments={'content':'partially saved'}))])
                 raise RuntimeError('synthetic provider failure')
             agent._memory_llm.call=failing
             return agent
@@ -41,7 +46,7 @@ async def exercise(fail, root, monkeypatch):
         steps=json.loads((audit/'trajectory_memory.json').read_text())['steps']
         assert not steps
         rows=[json.loads(x) for x in (audit/'memory_tool_results.jsonl').read_text().splitlines()]
-        assert len(rows)==1 and json.loads(rows[0]['tool_results'][0]['content'])['success']
+        assert len(rows)==3 and json.loads(rows[2]['tool_results'][0]['content'])['success']
         exit=json.loads((private/'worker_exit.json').read_text())
         assert exit['failure']['phase']=='unified' and exit['failure']['decision_produced'] is False
         assert not exit['task_end_saved']
@@ -57,11 +62,11 @@ async def exercise(fail, root, monkeypatch):
         await task
         audit=private/'archive'
         requests=[json.loads(x) for x in (audit/'memory_payload.jsonl').read_text().splitlines()]
-        assert len(requests)==2 and all(x['phase']=='unified_memory' for x in requests)
+        assert len(requests)==8 and all(x['phase']=='unified_memory' for x in requests)
         bank=json.loads((audit/'memory.json').read_text())
         assert len(bank['knowledge'])==2
         steps=json.loads((audit/'trajectory_memory.json').read_text())['steps']
-        assert len(steps)==2 and all(x['loop_mode']=='unified' and len(x['loop_rounds'])==1 for x in steps)
+        assert len(steps)==2 and all(x['loop_mode']=='remind_first' and len(x['loop_rounds'])==4 for x in steps)
         assert all(x['raw_response_phase2']==x['user_prompt_phase2']=='' for x in steps)
         assert json.loads((private/'worker_exit.json').read_text())['task_end_saved']
     print(json.dumps({'case':'failure' if fail else 'success','status':'passed','path':str(root)}))

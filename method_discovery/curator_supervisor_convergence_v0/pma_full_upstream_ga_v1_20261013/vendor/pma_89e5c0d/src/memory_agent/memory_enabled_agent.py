@@ -740,7 +740,7 @@ class MemoryEnabledTerminus2(Terminus2):
             entry["reasoning_phase2"] = result.reasoning_phase2 or ""
             entry["user_prompt_phase1"] = result.user_prompt_phase1 or ""
             entry["user_prompt_phase2"] = result.user_prompt_phase2 or ""
-            if getattr(result, "loop_mode", None) == "unified":
+            if getattr(result, "loop_mode", None) in {"unified", "remind_first"}:
                 entry["loop_mode"] = result.loop_mode
                 entry["loop_rounds"] = result.loop_rounds
                 entry["termination"] = result.termination

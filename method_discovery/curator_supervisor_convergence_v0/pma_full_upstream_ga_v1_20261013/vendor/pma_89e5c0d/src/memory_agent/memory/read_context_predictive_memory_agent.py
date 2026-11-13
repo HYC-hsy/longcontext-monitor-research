@@ -299,7 +299,7 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
                            "Continue." if operations else DECISION_RECOVERY_PROMPT)
             prior = self._p1_prior(user_prompt, new_wake=False)
 
-    def _record_p1_response(self, response):
+    def _record_p1_response(self, response, *, allowed_tools=None):
         native = getattr(response, "tool_calls", None) or []
         raw = getattr(response, "content", None) or ""
         parsed, ids = [], set()
@@ -335,6 +335,8 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
         operations, results = [], []
         for call_id, name, args in parsed:
             try:
+                if allowed_tools is not None and name not in allowed_tools:
+                    raise ValueError("tool unavailable in this stage; allowed: " + ", ".join(sorted(allowed_tools)))
                 if name == "memory_read":
                     if set(args) != {"bank_id"} or args["bank_id"] != "knowledge":
                         raise ValueError('memory_read requires exactly {"bank_id": "knowledge"}')
@@ -369,3 +371,180 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
 
     def get_tools_schema(self):
         return copy.deepcopy(BANK_TOOLS)
+
+
+# The prior implementation above remains available as a historical comparator.
+# Production read-context wiring below uses this same-session, ordered variant.
+REMIND_FIRST_SYSTEM = """You are the task's information organizer. Some information that appears during task execution remains valuable much later in the task, while other information only becomes valuable then. Your role is to predict and save this information, and remind the task agent when it is relevant to its current or upcoming work, helping it use existing information to complete the task.
+
+The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
+
+Carry out these steps in this same conversation:
+
+1. Recall and decide the reminder. Use memory_read to read the existing knowledge bank. After receiving its result, based on the task agent's current and upcoming work, decide whether to remind it of information in that bank. Do not save information yet. End this step with exactly one of:
+<context_for_action>
+Information to remind the task agent of.
+</context_for_action>
+<no_intervention/>
+
+2. Predict and save. When the program advances to this step, you must predict which information received this time will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected. The reminder decision has already been recorded and is not changed in this step. Use tools as needed; when finished, reply in ordinary text without a tool call. No completion tag is required. If nothing needs saving, say so in ordinary text.
+
+## Tools
+- memory_add: Save information in the knowledge bank; available during step 2.
+- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
+"""
+
+ORGANIZE_START_PROMPT = (
+    "The reminder decision is recorded. Now predict and save information for this wake "
+    "(step 2). It will not change the recorded reminder. When finished, reply in ordinary "
+    "text without a tool call; no completion tag is needed.")
+REMIND_READ_PROMPT = (
+    "Read the knowledge bank with memory_read before deciding. After its result is "
+    "returned, provide exactly one reminder decision tag. Do not save information yet.")
+ORGANIZE_TOOL_RECOVERY_PROMPT = (
+    "One or more memory tools failed. Review the actual tool receipts and correct "
+    "the failed calls if needed. Do not repeat successful memory writes. The "
+    "reminder decision remains recorded; finish organizing with ordinary text "
+    "without tool calls when ready.")
+ORGANIZE_RECOVERY_PROMPT = (
+    "The reminder decision is already recorded. Continue organizing information if needed. "
+    "When finished, reply in ordinary public text without tool calls or reminder tags. "
+    "Do not repeat successful memory writes.")
+
+
+def is_organize_completion(response):
+    """GA-style no-tool completion candidate, not a semantic quality verifier."""
+    if getattr(response, "tool_calls", None):
+        return False
+    raw = getattr(response, "content", None) or ""
+    if not isinstance(raw, str):
+        return False
+    # Normal adapters raise on provider truncation. Also reject explicit markers
+    # from GA-compatible/synthetic adapters rather than treating them as done.
+    if any(marker in raw[-100:] for marker in (
+            "[!!! 流异常中断", "!!!Error:", "max_tokens !!!]")):
+        return False
+    if getattr(response, "finish_reason", None) in {"length", "max_tokens", "error"}:
+        return False
+    if getattr(response, "stop_reason", None) in {"length", "max_tokens", "error"}:
+        return False
+    # A reminder tag is a phase-1 decision, never a phase-2 completion marker.
+    visible = _mask_decision_code(raw)
+    if re.search(r"<\s*/?\s*(?:context_for_action|no_intervention|tool_call)\b",
+                 visible, re.IGNORECASE):
+        return False
+    # Reuse the parser's malformed/nested hidden-span validation. The sentinel
+    # is internal only; the model still ends with ordinary no-tool text.
+    if parse_final_decision(raw + "\n<no_intervention/>")[0] != "no_intervention":
+        return False
+    visible = re.sub(r"<(think|thinking)\b[^>]*>.*?</\1\s*>",
+                     "", visible, flags=re.DOTALL | re.IGNORECASE)
+    if re.search(r"<\s*/?\s*(?:think|thinking)\b", visible, re.IGNORECASE):
+        return False
+    visible = re.sub(r"<[^>]*>", "", visible)
+    return any(character.isalnum() for character in visible)
+
+
+class RemindFirstMemoryAgent(ReadContextPredictiveMemoryAgent):
+    """Freeze the old-bank reminder before writes; then GA-style tool/no-tool loop.
+
+    Reuses provider-native history, tool dispatch/receipts, bank, transport and
+    code-preserving decision parser. No separate model, bank snapshot or done tool.
+    """
+
+    def reset_conversation_history(self):
+        super().reset_conversation_history()
+        self._wake_stage = "remind"
+        self._reminder_decision = (None, None)
+        self._reminder_bank_read = False
+
+    async def process(self, observation, step_count=0):
+        self._step = step_count
+        self._unified_rounds = []
+        self._phase1_operations = []
+        self._wake_stage = "remind"
+        self._reminder_decision = (None, None)
+        self._reminder_bank_read = False
+        try:
+            prompt = self._build_phase1_prompt(observation, step_count)
+            response = await self._call_llm_phase1(prompt)
+            kind, context = self._reminder_decision
+            return UnifiedMemoryAgentResult(
+                operations=list(self._phase1_operations),
+                should_inject=kind == "context_for_action", context_for_action=context,
+                raw_response_phase1=getattr(response, "content", None) or "",
+                user_prompt_phase1=prompt, loop_mode="remind_first",
+                loop_rounds=copy.deepcopy(self._unified_rounds),
+                termination="organize_no_tool")
+        except Exception as exc:
+            raise PMAPhaseError("unified", exc) from exc
+
+    def get_tools_schema(self):
+        tools = super().get_tools_schema()
+        if self._wake_stage == "remind":
+            return [tool for tool in tools if tool["function"]["name"] == "memory_read"]
+        return tools
+
+    def _record_p1_response(self, response):
+        allowed = {"memory_read"} if self._wake_stage == "remind" else {"memory_add", "memory_read"}
+        return super()._record_p1_response(response, allowed_tools=allowed)
+
+    async def _call_llm_phase1(self, user_prompt):
+        prior = self._p1_prior(user_prompt, new_wake=True)
+        self._new_trajectory = None
+        error_rounds = empty_rounds = 0
+        while True:
+            stage = self._wake_stage
+            # Readiness is sampled BEFORE this model call. A read in its own
+            # reply cannot mean that the model has already seen that receipt.
+            read_observed = self._reminder_bank_read
+            system = REMIND_FIRST_SYSTEM
+            if stage == "organize" and self._p1_public_text_missing:
+                system += "\n\n" + PUBLIC_FORECAST_REMINDER
+            response = await self.llm.call(prompt=user_prompt, system=system,
+                tools=self.get_tools_schema(), message_history=prior)
+            operations, _ = self._record_p1_response(response)
+            self._phase1_operations.extend(operations)
+            raw = getattr(response, "content", None) or ""
+            failed = any(not operation.success for operation in operations)
+            kind, context = parse_final_decision(raw)
+            decision_accepted = (stage == "remind" and read_observed and
+                                 not operations and kind is not None)
+            completed = stage == "organize" and is_organize_completion(response)
+            self._unified_rounds.append({
+                "round": len(self._unified_rounds) + 1, "stage": stage,
+                "prompt": user_prompt, "content": raw,
+                "operation_count": len(operations), "tool_error": failed,
+                "decision": kind, "decision_accepted": decision_accepted,
+                "bank_read_before_response": read_observed,
+                "organize_completed": completed})
+            if stage == "organize":
+                self._p1_public_text_missing = not has_public_text(raw)
+            if completed:
+                return response
+            if decision_accepted:
+                self._reminder_decision = (kind, context)
+                self._wake_stage = "organize"
+                error_rounds = empty_rounds = 0
+                user_prompt = ORGANIZE_START_PROMPT
+            else:
+                if stage == "remind" and any(
+                        op.action == "read" and op.success for op in operations):
+                    self._reminder_bank_read = True
+                error_rounds = error_rounds + 1 if failed else 0
+                if not operations:
+                    empty_rounds += 1
+                elif any(operation.success for operation in operations):
+                    empty_rounds = 0
+                if error_rounds >= MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS:
+                    raise PMAToolRecoveryExhausted(
+                        f"{error_rounds} consecutive tool-error rounds in {stage}")
+                if empty_rounds >= MAX_CONSECUTIVE_DECISION_ERROR_ROUNDS:
+                    raise PMADecisionRecoveryExhausted(
+                        f"{empty_rounds} invalid no-tool responses in {stage}")
+                user_prompt = ((ORGANIZE_TOOL_RECOVERY_PROMPT if stage == "organize" else
+                                TOOL_RECOVERY_PROMPT) if failed else
+                    REMIND_READ_PROMPT if stage == "remind" and not read_observed else
+                    DECISION_RECOVERY_PROMPT if stage == "remind" else
+                    "Continue." if operations else ORGANIZE_RECOVERY_PROMPT)
+            prior = self._p1_prior(user_prompt, new_wake=False)

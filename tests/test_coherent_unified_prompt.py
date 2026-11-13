@@ -48,7 +48,7 @@ def test_exact_approved_coherent_system():
 
 
 def nonprompt_digest(source):
-    # Runtime AST pinned after the authorized reminder-code preservation repair.
+    # Runtime AST pinned after the authorized reminder-first stage implementation.
     # Schemas, recovery, input wrappers and the tool loop remain protected.
     tree = ast.parse(source)
     for node in tree.body:
@@ -60,8 +60,8 @@ def nonprompt_digest(source):
     return hashlib.sha256(ast.dump(tree, include_attributes=False, **options).encode()).hexdigest()
 
 
-def test_runtime_matches_pinned_reminder_transport_repair():
-    assert nonprompt_digest(Path(module.__file__).read_text()) == '1ae0d2841f9807376d83e544625836b11c96588bd4a08ed65f9b74cb524db8a7'
+def test_runtime_matches_pinned_reminder_first_implementation():
+    assert nonprompt_digest(Path(module.__file__).read_text()) == '4fdcff3e80e8ad9dded20de0157538c8f10457714e9ca003c6dd81e531150711'
 
 
 def test_nonprompt_guard_rejects_runtime_change():

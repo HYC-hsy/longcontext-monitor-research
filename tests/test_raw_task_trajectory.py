@@ -158,7 +158,9 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
     assert end["unprocessed_tail_steps"] == 1 % rounds
     payloads = [json.loads(line) for line in (private / "archive/memory_payload.jsonl").read_text().splitlines()]
     wakes = (rounds * 2 + 1) // rounds
-    assert len(payloads) == 1 + wakes
+    assert len(payloads) == 3 * (1 + wakes)
+    wake_inputs = [row for row in payloads if row['prompt'].startswith(('<task_description>', '<task_trajectory>'))]
+    assert len(wake_inputs) == 1 + wakes
     for index, item in enumerate(steps):
         trajectory = item["event"]["trajectory"]
         assert validate_trajectory(trajectory, round_number=index + 1) == trajectory
@@ -178,9 +180,9 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
         batch = steps[wake * rounds:(wake + 1) * rounds]
         exact = "\n\n".join(json.dumps(item["event"]["trajectory"], ensure_ascii=False, sort_keys=True)
                             for item in batch)
-        request = payloads[1 + wake]
+        request = wake_inputs[1 + wake]
         assert request["prompt"] == '<task_trajectory>\n' + exact + '\n</task_trajectory>'
-        assert [tool["function"]["name"] for tool in request["tools"]] == ["memory_add", "memory_read"]
+        assert [tool["function"]["name"] for tool in request["tools"]] == ["memory_read"]
     assert json.loads((private / "archive/memory.json").read_text())["knowledge"] == []
 
 
@@ -304,8 +306,10 @@ def test_cancelled_attempt_kept_in_next_counted_batch(tmp_path):
             worker.terminate(); worker.wait(timeout=5)
         log.close()
     payloads = [json.loads(line) for line in (private / "archive/memory_payload.jsonl").read_text().splitlines()]
-    assert len(payloads) == 2
-    for row in payloads[1:]:
+    assert len(payloads) == 6
+    wake_inputs = [row for row in payloads if row['prompt'].startswith('<task_trajectory>')]
+    assert len(wake_inputs) == 1
+    for row in wake_inputs:
         assert all(f"real-input-{turn}" in row["prompt"] for turn in range(1, 5))
         assert '"status": "provider_cancelled"' in row["prompt"]
 
@@ -387,13 +391,18 @@ def test_failed_wake_retains_received_raw_event(tmp_path, failing_round):
     calls = []
     async def fake_call(**kwargs):
         calls.append(kwargs)
-        if len(calls) == (2 if failing_round == 'first' else 3):
+        n=len(calls)
+        if n == (4 if failing_round == 'first' else 7):
             raise RuntimeError('injected unified round failure')
-        if len(calls) == 2:
-            call = SimpleNamespace(id='memory-call', function=SimpleNamespace(
+        if n in (1,4):
+            tool = SimpleNamespace(id=f'read-{n}',function=SimpleNamespace(
+                name='memory_read',arguments={'bank_id':'knowledge'}))
+            return LLMResponse(content='Read bank.',tool_calls=[tool])
+        if n == 6:
+            tool = SimpleNamespace(id='memory-call', function=SimpleNamespace(
                 name='memory_add', arguments={'content': 'saved exactly once'}))
-            return LLMResponse(content='', tool_calls=[call])
-        return LLMResponse(content='<no_intervention/>')
+            return LLMResponse(content='Save.', tool_calls=[tool])
+        return LLMResponse(content='No information to save.' if n==3 else '<no_intervention/>')
     agent._memory_llm.call = fake_call
     episode = PMAEpisode(agent, run_id='r', task_id='t', archive=tmp_path / 'archive')
     def event(sequence, kind, **kwargs):
@@ -417,7 +426,7 @@ def test_failed_wake_retains_received_raw_event(tmp_path, failing_round):
     assert received[-1] == raw
     completed = [json.loads(line)['event']['event_id'] for line in (episode.archive / 'events.jsonl').read_text().splitlines()]
     assert '3' not in completed
-    assert len(calls) == (2 if failing_round == 'first' else 3)
+    assert len(calls) == (4 if failing_round == 'first' else 7)
     assert len(agent._memory.knowledge) == (0 if failing_round == 'first' else 1)
 
 

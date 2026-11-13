@@ -143,7 +143,7 @@ class Model4TransportTests(unittest.TestCase):
                 agent = construct_upstream(Path(directory), memory_profile=profile,
                                            research_candidate=READ_CONTEXT)
                 self.assertEqual(agent._research_candidate, READ_CONTEXT)
-                self.assertIn("ReadContextPredictiveMemoryAgent",
+                self.assertIn("RemindFirstMemoryAgent",
                               type(agent._memory_agent).__name__)
                 if model.startswith("gpt-"):
                     self.assertIsInstance(agent._memory_llm, ResponsesMemoryLLM)
@@ -193,20 +193,26 @@ class Model4TransportTests(unittest.TestCase):
                                            research_candidate=READ_CONTEXT)
                 memory = agent._memory_agent
                 memory.set_phase1_context(task="task description", trajectory="")
+                def message(text):
+                    return {"model": "gpt-6.1-sol", "status": "completed",
+                            "output": [{"type": "message", "content": [
+                                {"type": "output_text", "text": text}]}]}
                 responses = [
-                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p1",
-                     "output": [{"type": "function_call", "call_id": "call_1",
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "read",
+                     "output": [{"type": "function_call", "call_id": "call_read",
+                                 "name": "memory_read", "arguments": '{"bank_id":"knowledge"}'}]},
+                    message("<no_intervention/>"),
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "add",
+                     "output": [{"type": "function_call", "call_id": "call_add",
                                  "name": "memory_add", "arguments": '{"content":"remember this"}'}]},
-                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p2",
-                     "output": [{"type": "message", "content": [
-                         {"type": "output_text", "text": "<no_intervention/>"}]}]},
+                    message("Saved the useful information."),
                 ]
                 class FakeResponses:
                     async def create(self, **_):
                         return SimpleNamespace(model_dump=lambda **__: responses.pop(0))
                 agent._memory_llm.client.responses = FakeResponses()
                 result = await memory.process("task description", step_count=0)
-                self.assertEqual(len(result.operations), 1)
+                self.assertEqual(len(result.operations), 2)
                 self.assertTrue(result.operations[0].success)
                 self.assertFalse(result.should_inject)
                 self.assertFalse(responses)
@@ -224,12 +230,15 @@ class Model4TransportTests(unittest.TestCase):
                 agent = construct_upstream(root / "upstream", memory_profile=self.profile(),
                                            research_candidate=READ_CONTEXT)
                 outputs = [
-                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p1",
-                     "output": [{"type": "message", "content": [{
-                         "type": "output_text", "text": "No memory update."}]}]},
-                    {"model": "gpt-6.1-sol", "status": "completed", "id": "p2",
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "read",
+                     "output": [{"type": "function_call", "call_id": "call_read",
+                                 "name": "memory_read", "arguments": '{"bank_id":"knowledge"}'}]},
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "decision",
                      "output": [{"type": "message", "content": [{
                          "type": "output_text", "text": "<no_intervention/>"}]}]},
+                    {"model": "gpt-6.1-sol", "status": "completed", "id": "complete",
+                     "output": [{"type": "message", "content": [{
+                         "type": "output_text", "text": "No new information to save."}]}]},
                 ]
                 class FakeResponses:
                     async def create(self, **_):

@@ -198,17 +198,20 @@ def test_receipt_write_failure_never_queues_same_response_reminder(tmp_path, mon
     from episode import construct_upstream
     host=construct_upstream(tmp_path/'agent',research_candidate='pma_predictive_read_context_v1',
                             memory_api_key='synthetic',memory_api_base='https://example.invalid')
+    replies=iter([
+        SimpleNamespace(content='Read.',tool_calls=[SimpleNamespace(id='r',function=SimpleNamespace(name='memory_read',arguments={'bank_id':'knowledge'}))]),
+        SimpleNamespace(content='<context_for_action>DO NOT QUEUE</context_for_action>',tool_calls=[]),
+        SimpleNamespace(content='Save.',tool_calls=[SimpleNamespace(id='a',function=SimpleNamespace(name='memory_add',arguments={'content':'persist once'}))])])
     async def fake(**kwargs):
-        return SimpleNamespace(content='<context_for_action>DO NOT QUEUE</context_for_action>',
-            tool_calls=[SimpleNamespace(id='a',function=SimpleNamespace(name='memory_add',
-                arguments={'content':'persist once'}))])
+        return next(replies)
     host._memory_llm.call=fake
     host._memory_agent.set_phase1_context(task='immutable task',trajectory='')
     host._task_description='immutable task'
     archive=tmp_path/'audit'; archive.mkdir()
     append=worker_main.append_private_audit
     def fail_receipt(path,row):
-        if path.name=='memory_tool_results.jsonl':
+        if path.name=='memory_tool_results.jsonl' and any(
+                json.loads(item['content'])['action']=='add' for item in row['tool_results']):
             raise worker_main.PMAAuditIntegrityError('synthetic audit write failure')
         append(path,row)
     monkeypatch.setattr(worker_main,'append_private_audit',fail_receipt)

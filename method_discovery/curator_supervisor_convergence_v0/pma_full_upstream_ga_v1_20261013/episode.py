@@ -93,7 +93,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         agent._memory_llm = ResponsesMemoryLLM(memory_profile)
     if research_candidate in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
         if research_candidate == "pma_predictive_read_context_v1":
-            from memory_agent.memory.read_context_predictive_memory_agent import ReadContextPredictiveMemoryAgent as PredictiveMemoryAgent
+            from memory_agent.memory.read_context_predictive_memory_agent import RemindFirstMemoryAgent as PredictiveMemoryAgent
         elif research_candidate == "pma_predictive_context_v1":
             from memory_agent.memory.context_predictive_memory_agent import ContextPredictiveMemoryAgent as PredictiveMemoryAgent
         else:
