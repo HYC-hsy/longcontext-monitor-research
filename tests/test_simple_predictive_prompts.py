@@ -14,7 +14,9 @@ Before using memory tools, briefly state in ordinary reply text the upcoming pro
 
 Use memory_add to save information. When you need to look up information already saved, use memory_read with bank_id="knowledge".'''
     assert [t['function']['name'] for t in BANK_TOOLS] == ['memory_add', 'memory_read']
-    assert BANK_TOOLS[0]['function']['description'] == 'Save information in the knowledge memory bank.'
+    assert BANK_TOOLS[0]['function']['description'] == (
+        'Save the text supplied in content to the knowledge bank. '
+        'Your surrounding reply is not saved by this tool. Call it more than once when needed.')
 
 
 def test_p2_keeps_approved_selective_reminder_contract():

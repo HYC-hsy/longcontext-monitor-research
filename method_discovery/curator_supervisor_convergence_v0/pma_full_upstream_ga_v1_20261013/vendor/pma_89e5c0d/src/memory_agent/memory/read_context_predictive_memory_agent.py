@@ -149,7 +149,15 @@ BANK_TOOLS = copy.deepcopy(ADD_TOOLS) + [{
     },
 }]
 BANK_TOOLS[0]["function"]["parameters"]["additionalProperties"] = False
-BANK_TOOLS[0]["function"]["description"] = "Save information in the knowledge memory bank."
+BANK_TOOLS[0]["function"]["description"] = (
+    "Save the text supplied in content to the knowledge bank. "
+    "Your surrounding reply is not saved by this tool. Call it more than once when needed."
+)
+BANK_TOOLS[0]["function"]["parameters"]["properties"]["content"]["description"] = (
+    "The selected information, with the concrete details needed to understand and use it later. "
+    "Include the information itself, not just its name or a statement that it was saved. "
+    "This may include original text, code, or formulas."
+)
 
 MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS = 3
 

@@ -48,7 +48,7 @@ def test_exact_approved_coherent_system():
 
 
 def nonprompt_digest(source):
-    # Runtime AST pinned after the authorized nonterminal decision and current-state continuation repair.
+    # Runtime AST pinned after the authorized memory_add description-only update.
     # Schemas, recovery, input wrappers and the tool loop remain protected.
     tree = ast.parse(source)
     for node in tree.body:
@@ -61,7 +61,7 @@ def nonprompt_digest(source):
 
 
 def test_runtime_matches_pinned_reminder_first_implementation():
-    assert nonprompt_digest(Path(module.__file__).read_text()) == '208789181619bdfe8b4423b12905062430758512bcc95570089602f2cfbfe20e'
+    assert nonprompt_digest(Path(module.__file__).read_text()) == 'b9c2144571180921a027b0a5876485aa6f1002501ea0a2bdfda15944580a63b6'
 
 
 def test_nonprompt_guard_rejects_runtime_change():
