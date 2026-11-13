@@ -29,22 +29,22 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time will still be valuable after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected.
+1. Predict and save. You must predict which information received this time will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected.
 
-2. Recall and remind. After organizing the information for this wake, use memory_read to read the knowledge bank. Based on the task agent's current and upcoming work, select relevant information from the knowledge bank and remind it briefly and directly, including information inconsistent with its current judgment. Preserve the information's original level of certainty. If there is no relevant information, provide none. Do not take over the task agent's work.
+2. Recall and remind. After organizing the information for this wake, use memory_read to read the knowledge bank. Based on the task agent's current and upcoming work, decide whether to remind it of information in the knowledge bank.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
 - memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
 
-Organize information and recall relevant knowledge in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
+Organize information and decide whether to provide a reminder in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
-If there is relevant information:
+If a reminder is needed:
 <context_for_action>
-Relevant information for the task agent.
+Information to remind the task agent of.
 </context_for_action>
 
-If there is no relevant information:
+If no reminder is needed:
 <no_intervention/>"""
 
 DECISION_RECOVERY_PROMPT = (
@@ -108,7 +108,8 @@ def parse_final_decision(raw):
 
 PUBLIC_FORECAST_REMINDER = (
     "Briefly state which information you have selected that you predict will still "
-    "be valuable after the task has progressed for another eight turns.")
+    "be worth presenting to the task agent to support subsequent task work after "
+    "the task has progressed for another eight turns.")
 
 
 def has_public_text(text):

@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import hashlib
+import inspect
 from pathlib import Path
 
 import pytest
@@ -19,22 +20,22 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Based on the task description and the task agent's trajectory, carry out the following steps:
 
-1. Predict and save. You must predict which information received this time will still be valuable after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected.
+1. Predict and save. You must predict which information received this time will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. Before saving, briefly state which information you have selected.
 
-2. Recall and remind. After organizing the information for this wake, use memory_read to read the knowledge bank. Based on the task agent's current and upcoming work, select relevant information from the knowledge bank and remind it briefly and directly, including information inconsistent with its current judgment. Preserve the information's original level of certainty. If there is no relevant information, provide none. Do not take over the task agent's work.
+2. Recall and remind. After organizing the information for this wake, use memory_read to read the knowledge bank. Based on the task agent's current and upcoming work, decide whether to remind it of information in the knowledge bank.
 
 ## Tools
 - memory_add: Save information in the knowledge bank.
 - memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
 
-Organize information and recall relevant knowledge in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
+Organize information and decide whether to provide a reminder in this same conversation. When ready to finish this wake, end your reply with exactly one of the following decision tags:
 
-If there is relevant information:
+If a reminder is needed:
 <context_for_action>
-Relevant information for the task agent.
+Information to remind the task agent of.
 </context_for_action>
 
-If there is no relevant information:
+If no reminder is needed:
 <no_intervention/>'''
 
 
@@ -46,16 +47,28 @@ def test_exact_approved_coherent_system():
     assert UNIFIED_SYSTEM.count("<context_for_action>") == 1
 
 
-def test_only_system_and_soft_reminder_change_from_pinned_parent():
+def nonprompt_digest(source):
     # AST at f637998 after masking only the system and soft reminder.
     # Schemas, recovery, input wrappers and the tool loop remain protected.
-    tree = ast.parse(Path(module.__file__).read_text())
+    tree = ast.parse(source)
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
                 and target.id in {'UNIFIED_SYSTEM', 'PUBLIC_FORECAST_REMINDER'} for target in node.targets):
             node.value = ast.Constant('PROMPT_VALUE_ONLY')
-    digest = hashlib.sha256(ast.dump(tree, include_attributes=False).encode()).hexdigest()
-    assert digest == 'f0738cf778954a73499bf3cea10fc472447a769a87281c596726a231d89a3915'
+    # Python 3.13 omits empty lists by default; retain the 3.12 dump contract.
+    options = {'show_empty': True} if 'show_empty' in inspect.signature(ast.dump).parameters else {}
+    return hashlib.sha256(ast.dump(tree, include_attributes=False, **options).encode()).hexdigest()
+
+
+def test_only_system_and_soft_reminder_change_from_pinned_parent():
+    assert nonprompt_digest(Path(module.__file__).read_text()) == 'f0738cf778954a73499bf3cea10fc472447a769a87281c596726a231d89a3915'
+
+
+def test_nonprompt_guard_rejects_runtime_change():
+    source = Path(module.__file__).read_text()
+    changed = source.replace('MAX_CONSECUTIVE_DECISION_ERROR_ROUNDS = 2', 'MAX_CONSECUTIVE_DECISION_ERROR_ROUNDS = 3')
+    assert changed != source
+    assert nonprompt_digest(changed) != nonprompt_digest(source)
 
 
 @pytest.mark.parametrize('provider', ['openai', 'anthropic'])
@@ -111,7 +124,7 @@ def test_actual_system_prompt_and_continuation_are_coherent(provider, monkeypatc
     assert 'private-fixture' not in str(payload)
 
 
-EXPECTED_PUBLIC_REMINDER = 'Briefly state which information you have selected that you predict will still be valuable after the task has progressed for another eight turns.'
+EXPECTED_PUBLIC_REMINDER = 'Briefly state which information you have selected that you predict will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns.'
 
 
 def test_public_reminder_matches_information_forecast():
@@ -120,14 +133,14 @@ def test_public_reminder_matches_information_forecast():
     assert "do not disclose private reasoning" not in UNIFIED_SYSTEM
     for text in [UNIFIED_SYSTEM, PUBLIC_FORECAST_REMINDER]:
         assert 'problems or decisions' not in text
-    assert 'will still be valuable after the task has progressed for another eight turns' in PUBLIC_FORECAST_REMINDER
+    assert 'will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns' in PUBLIC_FORECAST_REMINDER
     assert 'briefly state which information you have selected' in UNIFIED_SYSTEM
     assert 'information received this time' in UNIFIED_SYSTEM
-    assert 'will still be valuable after the task has progressed for another eight turns' in UNIFIED_SYSTEM
+    assert 'will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns' in UNIFIED_SYSTEM
     assert 'the task agent may use' not in UNIFIED_SYSTEM
     assert 'four turns' not in UNIFIED_SYSTEM
     assert 'four turns' not in PUBLIC_FORECAST_REMINDER
-    assert 'briefly and directly' in UNIFIED_SYSTEM
+    assert 'briefly and directly' not in UNIFIED_SYSTEM
 
 
 def test_completion_tags_remain_but_long_protocol_guidance_is_removed():
@@ -140,12 +153,12 @@ def test_completion_tags_remain_but_long_protocol_guidance_is_removed():
 
 def test_forecast_window_does_not_delay_related_reminders():
     selection = UNIFIED_SYSTEM.split('1. Predict and save.', 1)[1].split('2. Recall', 1)[0]
-    assert 'will still be valuable after the task has progressed for another eight turns' in selection
+    assert 'will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns' in selection
     assert 'organize and save that information' in selection
     reminder = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
     assert "task agent's current and upcoming work" in reminder
     assert 'After organizing the information for this wake, use memory_read' in reminder
-    assert 'If there is no relevant information, provide none.' in reminder
+    assert 'decide whether to remind it of information in the knowledge bank.' in reminder
     assert 'six task-agent turns' not in reminder
     for removed in ['already visible', 'taken it into account', 'Default to no intervention']:
         assert removed not in UNIFIED_SYSTEM
@@ -170,7 +183,7 @@ def test_simple_selection_replaces_first_use_and_certainty_requirements():
                     'level of certainty', 'levels of certainty', 'future uses', 'six task-agent']:
         assert removed not in selection
         assert removed not in PUBLIC_FORECAST_REMINDER
-    assert 'Organize information and recall relevant knowledge in this same conversation.' in UNIFIED_SYSTEM
+    assert 'Organize information and decide whether to provide a reminder in this same conversation.' in UNIFIED_SYSTEM
 
 
 def test_recall_and_tool_contract_remain_current_work_based():
@@ -180,10 +193,10 @@ def test_recall_and_tool_contract_remain_current_work_based():
     assert 'next eight' not in reminder
 
 
-def test_recall_preserves_certainty_and_includes_conflicting_information():
+def test_recall_is_simple_model_decision_without_extra_rules():
     recall = UNIFIED_SYSTEM.split('2. Recall', 1)[1].split('## Tools', 1)[0]
-    assert "including information inconsistent with its current judgment" in recall
-    assert "Preserve the information's original level of certainty." in recall
+    assert "including information inconsistent with its current judgment" not in recall
+    assert "Preserve the information's original level of certainty." not in recall
     assert 'After organizing the information for this wake, use memory_read' in recall
     assert 'If you saved' not in recall
     assert 'eight' not in recall
