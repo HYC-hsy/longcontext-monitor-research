@@ -48,7 +48,7 @@ def test_exact_approved_coherent_system():
 
 
 def nonprompt_digest(source):
-    # Runtime AST pinned after the authorized reminder-first stage implementation.
+    # Runtime AST pinned after the approved context-and-bank prompt sentence.
     # Schemas, recovery, input wrappers and the tool loop remain protected.
     tree = ast.parse(source)
     for node in tree.body:
@@ -61,7 +61,7 @@ def nonprompt_digest(source):
 
 
 def test_runtime_matches_pinned_reminder_first_implementation():
-    assert nonprompt_digest(Path(module.__file__).read_text()) == '4fdcff3e80e8ad9dded20de0157538c8f10457714e9ca003c6dd81e531150711'
+    assert nonprompt_digest(Path(module.__file__).read_text()) == 'c096c65941775960b4ab627ba7ab6ff4c488473463075fb506f51d929d16bb0f'
 
 
 def test_nonprompt_guard_rejects_runtime_change():
