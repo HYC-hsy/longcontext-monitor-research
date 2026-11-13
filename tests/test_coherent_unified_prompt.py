@@ -48,7 +48,7 @@ def test_exact_approved_coherent_system():
 
 
 def nonprompt_digest(source):
-    # AST at f637998 after masking only the system and soft reminder.
+    # Runtime AST pinned after the authorized reminder-code preservation repair.
     # Schemas, recovery, input wrappers and the tool loop remain protected.
     tree = ast.parse(source)
     for node in tree.body:
@@ -60,8 +60,8 @@ def nonprompt_digest(source):
     return hashlib.sha256(ast.dump(tree, include_attributes=False, **options).encode()).hexdigest()
 
 
-def test_only_system_and_soft_reminder_change_from_pinned_parent():
-    assert nonprompt_digest(Path(module.__file__).read_text()) == 'f0738cf778954a73499bf3cea10fc472447a769a87281c596726a231d89a3915'
+def test_runtime_matches_pinned_reminder_transport_repair():
+    assert nonprompt_digest(Path(module.__file__).read_text()) == '1ae0d2841f9807376d83e544625836b11c96588bd4a08ed65f9b74cb524db8a7'
 
 
 def test_nonprompt_guard_rejects_runtime_change():

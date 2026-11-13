@@ -69,6 +69,12 @@ class PMADecisionRecoveryExhausted(RuntimeError):
     """Missing/malformed decisions are failures, never silent no-intervention."""
 
 
+def _mask_decision_code(text):
+    """Ignore fenced examples as protocol, retaining offsets into the original."""
+    return re.sub(r"```.*?(?:```|$)|~~~.*?(?:~~~|$)",
+                  lambda match: " " * len(match.group(0)), text, flags=re.DOTALL)
+
+
 def parse_final_decision(raw):
     """Parse only an unambiguous, terminal public tag; no semantic checker."""
     if not isinstance(raw, str):
@@ -76,7 +82,8 @@ def parse_final_decision(raw):
     # Fail closed on malformed/nested hidden spans. A single regex replacing
     # the first closing tag could expose text still inside an outer block.
     visible, end, hidden = [], 0, None
-    for token in re.finditer(r"</?(think|thinking|tool_call)\b[^>]*>", raw, re.IGNORECASE):
+    for token in re.finditer(r"</?(think|thinking|tool_call)\b[^>]*>",
+                             _mask_decision_code(raw), re.IGNORECASE):
         closing = token.group(0).startswith("</")
         name = token.group(1).lower()
         if closing:
@@ -93,16 +100,19 @@ def parse_final_decision(raw):
         return None, None
     visible.append(raw[end:])
     public = "".join(visible)
-    if re.search(r"<\s*/?\s*(?:think|thinking|tool_call)\b", public, re.IGNORECASE):
+    protocol = _mask_decision_code(public)
+    if re.search(r"<\s*/?\s*(?:think|thinking|tool_call)\b", protocol, re.IGNORECASE):
         return None, None
-    public = re.sub(r"```.*?(?:```|$)|~~~.*?(?:~~~|$)", "", public, flags=re.DOTALL).strip()
-    tokens = re.findall(r"</?(?:context_for_action|no_intervention)\b[^>]*>", public)
-    if tokens == ["<no_intervention/>"] and public.endswith(tokens[0]):
+    tokens = re.findall(r"</?(?:context_for_action|no_intervention)\b[^>]*>", protocol)
+    if tokens == ["<no_intervention/>"] and protocol.rstrip().endswith(tokens[0]):
         return "no_intervention", None
     if tokens == ["<context_for_action>", "</context_for_action>"]:
-        match = re.search(r"<context_for_action>(.*?)</context_for_action>\s*$", public, re.DOTALL)
-        if match and match.group(1).strip():
-            return "context_for_action", match.group(1).strip()
+        match = re.search(r"<context_for_action>(.*?)</context_for_action>\s*$", protocol, re.DOTALL)
+        if match:
+            # Protocol recognition must never rewrite the reminder payload.
+            content = public[match.start(1):match.end(1)].strip()
+            if content:
+                return "context_for_action", content
     return None, None
 
 
