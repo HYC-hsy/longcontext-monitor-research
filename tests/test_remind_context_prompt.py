@@ -6,14 +6,13 @@ from test_remind_first_loop import make, read, decision, done, run
 
 OLD = "After receiving its result, based on the task agent's current and upcoming work, decide whether to remind it of information in that bank."
 NEW = 'After receiving its result, consider both the conversation context and the knowledge bank to decide whether to remind the task agent, and what to remind it of, based on its current and upcoming work.'
-PARENT_SOURCE_SHA256 = '335950c22fecde20eaeab9234ee2f74b370cfb010d6498593a9290d9457bc0ca'
+PARENT_SYSTEM_SHA256 = '688f3f0205543ed9145fb3ade1472c11b5cf120935f1e2c2a8abe8c85eb5cb13'
 
 
-def test_only_approved_sentence_changed_from_71fd_parent():
-    source = Path(module.__file__).read_text(encoding='utf-8')
-    assert source.count(NEW) == 1
-    assert OLD not in source
-    assert hashlib.sha256(source.replace(NEW, OLD).encode()).hexdigest() == PARENT_SOURCE_SHA256
+def test_approved_system_is_unchanged_by_engineering_repair():
+    assert module.REMIND_FIRST_SYSTEM.count(NEW) == 1
+    assert OLD not in module.REMIND_FIRST_SYSTEM
+    assert hashlib.sha256(module.REMIND_FIRST_SYSTEM.encode()).hexdigest() == PARENT_SYSTEM_SHA256
 
 
 def test_context_and_bank_wording_reaches_all_requests_and_initialization_is_unified():

@@ -42,11 +42,10 @@ def test_fenced_payload_preserved_but_literal_tags_not_protocol(fence, body):
     '~~~xml\n<no_intervention/>\n~~~',
     '<context_for_action>```python\nunclosed\n</context_for_action>',
     '<context_for_action>x</context_for_action><no_intervention/>',
-    '<context_for_action>x</context_for_action>trailing',
     '<think><context_for_action>private</context_for_action></think>',
     '<think>unclosed<context_for_action>x</context_for_action>',
 ])
-def test_ambiguous_hidden_fenced_or_nonterminal_decisions_stay_rejected(raw):
+def test_ambiguous_hidden_or_fenced_decisions_stay_rejected(raw):
     assert parse_final_decision(raw) == (None, None)
 
 

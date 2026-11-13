@@ -88,8 +88,8 @@ def test_same_response_add_finish_audit_precedes_accepted_cycle(tmp_path):
 
 @pytest.mark.parametrize('text', ['```xml\n<no_intervention/>\n```',
     '<tool_call><no_intervention/></tool_call>', '<thinking><no_intervention/></thinking>',
-    '<context_for_action> </context_for_action>', '<no_intervention/> trailing text'])
-def test_format_parser_cannot_accept_nonterminal_or_hidden_tags(text):
+    '<context_for_action> </context_for_action>'])
+def test_format_parser_cannot_accept_empty_or_hidden_tags(text):
     assert parse_final_decision(text) == (None, None)
 
 

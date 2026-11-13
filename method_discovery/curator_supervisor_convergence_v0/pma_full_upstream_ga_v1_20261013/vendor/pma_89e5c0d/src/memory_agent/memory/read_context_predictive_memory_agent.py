@@ -76,7 +76,7 @@ def _mask_decision_code(text):
 
 
 def parse_final_decision(raw):
-    """Parse only an unambiguous, terminal public tag; no semantic checker."""
+    """Extract an unambiguous public decision tag anywhere; no semantic checker."""
     if not isinstance(raw, str):
         return None, None
     # Fail closed on malformed/nested hidden spans. A single regex replacing
@@ -104,10 +104,10 @@ def parse_final_decision(raw):
     if re.search(r"<\s*/?\s*(?:think|thinking|tool_call)\b", protocol, re.IGNORECASE):
         return None, None
     tokens = re.findall(r"</?(?:context_for_action|no_intervention)\b[^>]*>", protocol)
-    if tokens == ["<no_intervention/>"] and protocol.rstrip().endswith(tokens[0]):
+    if tokens == ["<no_intervention/>"]:
         return "no_intervention", None
     if tokens == ["<context_for_action>", "</context_for_action>"]:
-        match = re.search(r"<context_for_action>(.*?)</context_for_action>\s*$", protocol, re.DOTALL)
+        match = re.search(r"<context_for_action>(.*?)</context_for_action>", protocol, re.DOTALL)
         if match:
             # Protocol recognition must never rewrite the reminder payload.
             content = public[match.start(1):match.end(1)].strip()
@@ -401,6 +401,14 @@ ORGANIZE_START_PROMPT = (
 REMIND_READ_PROMPT = (
     "Read the knowledge bank with memory_read before deciding. After its result is "
     "returned, provide exactly one reminder decision tag. Do not save information yet.")
+REMIND_DECISION_PROMPT = (
+    "The knowledge bank result is available in this conversation. Decide whether to "
+    "remind the task agent using exactly one reminder decision tag. Do not save "
+    "information yet; the program will advance to step 2 after accepting the decision.")
+REMIND_TOOL_RECOVERY_PROMPT = (
+    "You are still in the reminder step; only memory_read is available. Review the "
+    "tool receipts and correct failed calls if needed. After reading the bank, "
+    "provide exactly one reminder decision tag. Do not save information yet.")
 ORGANIZE_TOOL_RECOVERY_PROMPT = (
     "One or more memory tools failed. Review the actual tool receipts and correct "
     "the failed calls if needed. Do not repeat successful memory writes. The "
@@ -543,8 +551,8 @@ class RemindFirstMemoryAgent(ReadContextPredictiveMemoryAgent):
                     raise PMADecisionRecoveryExhausted(
                         f"{empty_rounds} invalid no-tool responses in {stage}")
                 user_prompt = ((ORGANIZE_TOOL_RECOVERY_PROMPT if stage == "organize" else
-                                TOOL_RECOVERY_PROMPT) if failed else
-                    REMIND_READ_PROMPT if stage == "remind" and not read_observed else
-                    DECISION_RECOVERY_PROMPT if stage == "remind" else
+                                REMIND_TOOL_RECOVERY_PROMPT) if failed else
+                    REMIND_READ_PROMPT if stage == "remind" and not self._reminder_bank_read else
+                    REMIND_DECISION_PROMPT if stage == "remind" else
                     "Continue." if operations else ORGANIZE_RECOVERY_PROMPT)
             prior = self._p1_prior(user_prompt, new_wake=False)
