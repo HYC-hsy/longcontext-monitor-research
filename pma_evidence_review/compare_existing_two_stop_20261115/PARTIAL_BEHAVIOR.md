@@ -1,0 +1,11 @@
+# Partial behavior observed before infrastructure stop
+
+This is a diagnostic of the attempted `rstan-to-pystan` run `pma-cf82e7c25fcf4e3d`, not a completed task or native evaluation. `reshard-c4-data` has no run claim and did not start.
+
+The Task side recorded 17 completed actor steps and 18 provider-request attempts. The information manager had five wakes (initial, then steps 4, 8, 12, 16) and 23 visible model responses. It requested `memory_read` eight times and `memory_add` eight times; all eight reads and eight adds have success receipts. One `$FUNCTION_NAME` and one unopened `code_run` request have failure receipts and are not counted as successful operations.
+
+The first accepted decision was `no_intervention` at the first four wakes. At step 4 a later `context_for_action` tag appeared in the same wake, but did not override the first accepted decision. At step 16 the first accepted decision was `context_for_action`; the reminder was assembled for actor attempt 17, appears in the matching `provider_request_ready`, and a subsequent `provider_request_attempt` exists. This establishes a request attempt containing the reminder, not that it caused a later outcome.
+
+At step 16 the manager's public text cited the visible error `Unknown field` for `adapt_delta` and `max_treedepth`, contrasted it with the agent's proposed `delta` and `max_depth`, and claimed the script *should* work after the change. The first part is an observed mismatch in the visible tool result; the final claim was a prediction, not a verified sampling result. The Docker exec 500 interrupted the Task before native evaluation, so whether the corrected approach succeeded is unknown. The complete visible request/response, bank, tool receipts and Task events are in the ZIP for a fuller audit.
+
+The infrastructure error was a Docker exec route returning HTTP 500, followed by an unavailable GA control-process scan. The run disposition is `stop_batch_native_evaluation_unavailable`; the reward must not be entered as zero. The owned resources were marked clean, and no second task was launched. Offline 60/60 targeted checks passed after setting the production module import path; the initial collection failure is retained in the ZIP as an environment setup record, not hidden as a passed test.
