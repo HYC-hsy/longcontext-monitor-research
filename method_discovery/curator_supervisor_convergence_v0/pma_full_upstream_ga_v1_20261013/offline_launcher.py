@@ -123,6 +123,12 @@ def _prepare_common(args, *, fake_gateway: bool) -> dict:
         ".git", "temp", "tests", "__pycache__", ".pytest_cache", "*.pyc",
         "*.local.json", "file_access_stats.json", "mykey.py"))
     shutil.copy2(Path(args.task_profile_file).resolve(strict=True), ga_stage / "mykey.py")
+    if manifest.get('config', {}).get('research_candidate') == 'pma_predictive_read_context_v1':
+        # Only the isolated deployment adapter changes; GA source stays untouched.
+        shutil.copy2(STAGE / 'ga_log_adapter.py', ga_stage / 'ga_trajectory.py')
+        shutil.copy2(STAGE / 'public_trajectory.py', ga_stage / 'public_trajectory.py')
+        shutil.copy2(STAGE / 'ga_log_format.py', ga_stage / 'ga_log_format.py')
+
     if stateful:
         shutil.copy2(STAGE / 'event_spool.py', ga_stage / 'event_spool.py')
         host_stage = root / 'control' / 'stateful_host_stage'

@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -83,6 +84,10 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
     from llmcore import NativeClaudeSession, NativeToolClient
     from research_runtime import research_context
 
+    sys.path.insert(0, str(STAGE))
+    import ga_trajectory
+    from ga_log_adapter import GATrajectory as LogAdapter
+    monkeypatch.setattr(ga_trajectory, "GATrajectory", LogAdapter)
     worker, log, requests, responses, private = start_worker(tmp_path, rounds)
     sent, emitted = [], []
     # Hostile-looking source text stays data. It cannot invoke memory_add.
@@ -97,7 +102,8 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
         def do_POST(self):
             sent.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
             turn = len(sent)
-            blocks = [{"type": "text", "text": "same actual repeated output"}]
+            blocks = [{"type": "text", "text": "same actual repeated output"},
+                      {"type": "thinking", "thinking": "synthetic fixture", "signature": "synthetic-signature"}]
             if turn <= rounds * 2 + 1:
                 blocks += [{"type": "tool_use", "id": f"call-{turn}-{i}",
                             "name": "echo", "input": {"item": i}}
@@ -139,6 +145,7 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
         "apibase": f"http://127.0.0.1:{server.server_port}", "model": "mock",
         "stream": False, "max_tokens": 1024, "context_win": 30000})
     client = NativeToolClient(backend)
+    client.log_path = str(tmp_path / "actual-ga-log.txt")
     tools = [{"type": "function", "function": {"name": "echo", "parameters": {
         "type": "object", "properties": {"item": {"type": "integer"}}}}}]
     try:
@@ -164,22 +171,39 @@ def test_real_loop_and_worker_batches(monkeypatch, tmp_path, rounds):
     for index, item in enumerate(steps):
         trajectory = item["event"]["trajectory"]
         assert validate_trajectory(trajectory, round_number=index + 1) == trajectory
-        current_input = next(e["payload"] for e in trajectory["events"] if e["kind"] == "input")
+        current_input = copy.deepcopy(next(e["payload"] for e in trajectory["events"] if e["kind"] == "input"))
         # Ignore only transport cache directives, not any source content.
         actual = copy.deepcopy(sent[index]["messages"][-1])
         for block in actual["content"]:
             block.pop("cache_control", None)
+        assert current_input.pop("log_prompt") == json.dumps(actual, ensure_ascii=False, indent=2)
         assert current_input == actual
         assistant = next(e["payload"] for e in trajectory["events"] if e["kind"] == "assistant")
-        assert assistant["content"] == emitted[index]
+        assert assistant["content"] == [b for b in emitted[index] if b["type"] != "thinking"]
+        assert assistant["log_response"] == str(emitted[index])
         receipts = [e["payload"] for e in trajectory["events"] if e["kind"] == "tool_result"]
         if index < rounds * 2 + 1:
             assert [r["native_tool_call_id"] for r in receipts] == [f"call-{index+1}-{i}" for i in range(2)]
             assert all(json.loads(r["content"])["text"] == raw for r in receipts)
+    # Compare the ACTUAL GA writer output from the same run, not just a
+    # recreated expression. Only GA file metadata header suffixes differ.
+    logged = (tmp_path / "actual-ga-log.txt").read_text()
+    log_bodies = re.split(r"^=== (?:Prompt|Response) ===[^\n]*\n", logged, flags=re.M)[1:]
+    assert len(log_bodies) == 2 * len(steps)
+    for index, item in enumerate(steps):
+        events = item['event']['trajectory']['events']
+        prompt = next(e['payload']['log_prompt'] for e in events if e['kind'] == 'input')
+        response = next(e['payload']['log_response'] for e in events if e['kind'] == 'assistant')
+        assert log_bodies[2 * index] == prompt + "\n\n"
+        assert log_bodies[2 * index + 1] == response + "\n\n"
     for wake in range(wakes):
         batch = steps[wake * rounds:(wake + 1) * rounds]
-        exact = "\n\n".join(json.dumps(item["event"]["trajectory"], ensure_ascii=False, sort_keys=True)
-                            for item in batch)
+        exact = "\n\n".join("".join(
+            f"=== Prompt ===\n{e['payload']['log_prompt']}\n\n"
+            if e['kind'] == 'input' else
+            f"=== Response ===\n{str(emitted[item['event']['trajectory']['round'] - 1])}\n\n"
+            for e in item['event']['trajectory']['events'] if e['kind'] in {'input', 'assistant'})
+            for item in batch)
         request = wake_inputs[1 + wake]
         assert request["prompt"] == '<task_trajectory>\n' + exact + '\n</task_trajectory>'
         assert [tool["function"]["name"] for tool in request["tools"]] == ["memory_add", "memory_read"]
@@ -290,10 +314,10 @@ def test_cancelled_attempt_kept_in_next_counted_batch(tmp_path):
         for turn in range(1, 5):
             bridge.before_actor_call(turn)
             ledger = PublicTrajectory(turn)
-            ledger.record("input", "input", {"content": f"real-input-{turn}"})
+            ledger.record("input", "input", {"content": f"real-input-{turn}", "log_prompt": f"real-input-{turn}"})
             status = "provider_cancelled" if turn == 1 else "normal"
             if turn > 1:
-                ledger.record("reply", "assistant", {"content": "same", "tool_call_ids": []})
+                ledger.record("reply", "assistant", {"content": "same", "log_response": "same", "tool_call_ids": []})
             ledger.record("status", "round_status", {"status": status})
             result = bridge.actor_step(turn, status=status, trajectory=ledger.snapshot())
             assert bool(result.get("triggered")) == (turn == 4)
@@ -311,7 +335,7 @@ def test_cancelled_attempt_kept_in_next_counted_batch(tmp_path):
     assert len(wake_inputs) == 1
     for row in wake_inputs:
         assert all(f"real-input-{turn}" in row["prompt"] for turn in range(1, 5))
-        assert '"status": "provider_cancelled"' in row["prompt"]
+        assert '"status": "provider_cancelled"' not in row["prompt"]  # GA TXT has no status section
 
 
 def test_duplicate_native_id_is_two_real_tool_occurrences():
@@ -409,8 +433,8 @@ def test_failed_wake_retains_received_raw_event(tmp_path, failing_round):
         return {'run_id': 'r', 'task_id': 't', 'event_id': str(sequence),
                 'sequence': sequence, 'kind': kind, **kwargs}
     ledger = PublicTrajectory(1)
-    ledger.record('i', 'input', {'content': 'exact received input'})
-    ledger.record('a', 'assistant', {'content': 'exact received output', 'tool_call_ids': []})
+    ledger.record('i', 'input', {'content': 'exact received input', 'log_prompt': 'exact received input'})
+    ledger.record('a', 'assistant', {'content': 'exact received output', 'log_response': 'exact received output', 'tool_call_ids': []})
     ledger.record('s', 'round_status', {'status': 'normal'})
     raw = event(3, 'actor_step', actor_attempt=1, step_status='normal', trajectory=ledger.snapshot())
     async def scenario():

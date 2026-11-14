@@ -94,6 +94,10 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
     if research_candidate in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
         if research_candidate == "pma_predictive_read_context_v1":
             from memory_agent.memory.read_context_predictive_memory_agent import RemindFirstMemoryAgent as PredictiveMemoryAgent
+            from functools import partial
+            from ga_log_format import format_step_entry
+            agent._format_step_entry = partial(
+                format_step_entry, fallback=agent._format_step_entry)
         elif research_candidate == "pma_predictive_context_v1":
             from memory_agent.memory.context_predictive_memory_agent import ContextPredictiveMemoryAgent as PredictiveMemoryAgent
         else:

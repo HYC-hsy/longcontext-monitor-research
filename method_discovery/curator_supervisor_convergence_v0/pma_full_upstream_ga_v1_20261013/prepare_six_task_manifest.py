@@ -63,6 +63,9 @@ SOURCE_FILES = (
     'six_task_plan.py',
 )
 V3_SOURCE_FILES = SOURCE_FILES + (
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/ga_log_format.py',
+    'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/ga_log_adapter.py',
+
     'GenericAgent-main/agent_loop.py',
     'GenericAgent-main/agentmain.py',
     'GenericAgent-main/llmcore.py',
