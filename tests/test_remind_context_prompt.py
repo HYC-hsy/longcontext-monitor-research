@@ -5,8 +5,8 @@ from memory_agent.memory import read_context_predictive_memory_agent as module
 from test_remind_first_loop import make, read, decision, done, run
 
 OLD = "After receiving its result, based on the task agent's current and upcoming work, decide whether to remind it of information in that bank."
-NEW = 'After receiving its result, consider both the conversation context and the knowledge bank to decide whether to remind the task agent, and what to remind it of, based on its current and upcoming work.'
-PARENT_SYSTEM_SHA256 = 'de71ca218c4e65f346b4b660214a43d55b2cee89a302e11ba75206254c5e1847'
+NEW = "After receiving its result, consider the conversation context and compare relevant information in the knowledge bank with the task agent's current and upcoming work to decide whether to remind the task agent, and what to remind it of."
+PARENT_SYSTEM_SHA256 = '0e397e323abb83a9b479a0be802dc0a9ef771dd3a06bb765dd063069a867b169'
 
 
 def test_approved_system_has_complete_save_guidance_and_same_reminder():
