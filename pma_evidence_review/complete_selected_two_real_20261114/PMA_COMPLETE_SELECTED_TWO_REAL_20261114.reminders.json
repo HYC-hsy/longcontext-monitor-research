@@ -1,0 +1,36 @@
+{
+  "reminders": [
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-188f8bd92c4d4d7d",
+      "actor_attempt": 21,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**Critical bug found in current code (Turn 20):**\n\nThe agent discovered that `rho_means` and `beta_means` have wrong shapes (1000,) instead of required (3,). \n\n**Root cause**: In lines 167-168 of /app/pystan_analysis.py:\n- `np.mean(rho_samples, axis=0)` is averaging across the wrong axis\n- PyStan 3 returns shape (3, 1000) where axis 0 = parameters, axis 1 = samples\n- Using `axis=0` averages across parameters → produces (1000,) \n- Must use `axis=1` to average across samples → produces (3,)\n\n**Fix needed**:\n```python\nrho_means = np.mean(rho_samples, axis=1)  # Change axis=0 to axis=1\nbeta_means = np.mean(beta_samples, axis=1)  # Change axis=0 to axis=1\n```\n\nThis will make rho_est.csv and beta_est.csv contain 3 values each (one per parameter) instead of 1000 values (all samples).\n</memory_context>",
+      "request_ready_event_id": "evt_d65ad978b9474f7fa287ee0fa3208493",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b2a7e0eb1f664a48",
+      "actor_attempt": 9,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent has now read /app/examples.json and discovered 3 example input-output pairs. The examples show a clear pattern:\n- Example 1: Non-zero values (1, 2, 4) appear on a diagonal in the input, and the output is a repeating pattern (2, 4, 1) cycling across rows\n- Example 2: Non-zero values (2, 8, 3) appear on a diagonal, output cycles (2, 8, 3) \n- Example 3: Two diagonals with values (8, 3) and (4), output cycles (4, 8, 3)\n\nThe agent has seen two conflicting implementations:\n- branch1: function named `map`, uses modulo 4 pattern with (i+j)%4\n- branch2: function named `transform` (NOT `map`), uses numpy, modulo 3 pattern with (i-j)%3 for collecting and (i+j)%3 for filling\n\nCritical reminder: The task requires the final algo.py to have a function named `map` (not `transform`). Branch2's implementation has the wrong function name and will fail the requirement even if its algorithm is correct. The agent needs to ensure the merged result has a function named `map`.\n</memory_context>",
+      "request_ready_event_id": "evt_b51a91dd8c1a452da99cfa7c9ad32700",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b2a7e0eb1f664a48",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent has just resolved the merge conflict by writing a new algo.py that combines branch2's correct algorithm (modulo 3 pattern) with branch1's correct function name (`map`), and converted it to work with lists instead of numpy arrays.\n\nCritical next steps the agent needs to complete:\n1. Stage the resolved algo.py file and complete the merge commit (git add algo.py && git commit)\n2. Verify the implementation against ALL examples in /app/examples.json to ensure correctness\n3. The agent may also need to handle other files from the merge (utils.py from branch1, requirements.txt from branch2)\n\nThe verification requirement is essential - the task explicitly states \"Verify that algo.py produces the correct outputs for all examples in /app/examples.json\" and success depends on exact element-by-element matching including for hidden test inputs.\n</memory_context>",
+      "request_ready_event_id": "evt_885569c2a4894ed3b877a8032d97a7d6",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-b2a7e0eb1f664a48",
+      "actor_attempt": 17,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent's current algorithm is failing all test cases. Looking at the actual data from the trajectory, the pattern is now clear:\n\n**Example 1 Input Analysis:**\n- Position (i-j)%3=0: values are 1, 2, 4\n- Position (i-j)%3=1: values are 1, 2, 4  \n- Position (i-j)%3=2: values are 1, 2, 4\n\n**Example 1 Expected Output Pattern:**\n- Row 0: [2, 4, 1, 2, 4, 1, 2] - follows (i+j)%3 pattern: 0→2, 1→4, 2→1\n- Row 1: [4, 1, 2, 4, 1, 2, 4] - follows (i+j)%3 pattern: 0→4, 1→1, 2→2\n- Row 2: [1, 2, 4, 1, 2, 4, 1] - follows (i+j)%3 pattern: 0→1, 1→2, 2→4\n\n**Example 2 shows the actual pattern:**\n- (i-j)%3=0 positions: value=2\n- (i-j)%3=1 positions: value=3\n- (i-j)%3=2 positions: value=8\n- Expected output row 0: [2, 8, 3, ...] means (i+j)%3=0→2, (i+j)%3=1→8, (i+j)%3=2→3\n\n**The correct algorithm:** Extract values indexed by (i-j)%3 from input, then fill output at position (i,j) using the value associated with (i+j)%3. But the current implementation uses dictionary lookups incorrectly - it's using d.get((i+j)%3, 0) but should map the (i+j)%3 key to the (i-j)%3 extraction pattern.\n\nThe agent needs to re-read the current algo.py to see what's actually implemented, then fix the mapping logic to correctly associate input diagonal classes (i-j)%3 with output position classes (i+j)%3.\n</memory_context>",
+      "request_ready_event_id": "evt_3cd84b23470d43e6be11e56d92832e92",
+      "provider_attempt": true
+    }
+  ]
+}
