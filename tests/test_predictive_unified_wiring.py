@@ -200,8 +200,7 @@ def test_receipt_write_failure_never_queues_same_response_reminder(tmp_path, mon
                             memory_api_key='synthetic',memory_api_base='https://example.invalid')
     replies=iter([
         SimpleNamespace(content='Read.',tool_calls=[SimpleNamespace(id='r',function=SimpleNamespace(name='memory_read',arguments={'bank_id':'knowledge'}))]),
-        SimpleNamespace(content='<context_for_action>DO NOT QUEUE</context_for_action>',tool_calls=[]),
-        SimpleNamespace(content='Save.',tool_calls=[SimpleNamespace(id='a',function=SimpleNamespace(name='memory_add',arguments={'content':'persist once'}))])])
+        SimpleNamespace(content='<context_for_action>DO NOT QUEUE</context_for_action> Save.',tool_calls=[SimpleNamespace(id='a',function=SimpleNamespace(name='memory_add',arguments={'content':'persist once'}))])])
     async def fake(**kwargs):
         return next(replies)
     host._memory_llm.call=fake

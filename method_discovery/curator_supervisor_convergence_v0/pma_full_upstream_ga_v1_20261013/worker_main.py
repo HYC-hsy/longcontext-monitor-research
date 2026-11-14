@@ -228,18 +228,17 @@ async def serve(args: argparse.Namespace) -> None:
             read_context_fake_calls += 1
             if args.research_candidate == 'pma_predictive_read_context_v1':
                 manager = agent._memory_agent
-                if manager._wake_stage == 'remind':
-                    if not manager._reminder_bank_read:
-                        return LLMResponse(content='Read existing memory.', tool_calls=[SimpleNamespace(
-                            id=f'offline-read-{read_context_fake_calls}', function=SimpleNamespace(
-                                name='memory_read', arguments={'bank_id': 'knowledge'}))])
-                    return LLMResponse(content='<context_for_action>Synthetic public result remains available.</context_for_action>')
+                if not any(op.action == 'read' and op.success
+                           for op in manager._phase1_operations):
+                    return LLMResponse(content='Read existing memory.', tool_calls=[SimpleNamespace(
+                        id=f'offline-read-{read_context_fake_calls}', function=SimpleNamespace(
+                            name='memory_read', arguments={'bank_id': 'knowledge'}))])
                 if getattr(args, 'fake_memory_update', False) and not any(
                         op.action == 'add' and op.success for op in manager._phase1_operations):
                     return LLMResponse(content='Save synthetic information.', tool_calls=[SimpleNamespace(
                         id=f'offline-add-{read_context_fake_calls}', function=SimpleNamespace(
                             name='memory_add', arguments={'content': 'Synthetic public result remains available.'}))])
-                return LLMResponse(content='Information organization is complete.')
+                return LLMResponse(content='<context_for_action>Synthetic public result remains available.</context_for_action>')
             if args.research_candidate in ('pma_predictive_f838_v1', 'pma_predictive_context_v1', 'pma_predictive_read_context_v1'):
                 if tools:
                     calls = ([SimpleNamespace(id=(f'offline-call-{read_context_fake_calls}'

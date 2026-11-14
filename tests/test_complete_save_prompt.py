@@ -1,4 +1,4 @@
-"""Prompt-only regression against the tool-contract parent; no model calls."""
+"""Predictive prompt regression for the prompt-guided loop; no model calls."""
 import ast
 import hashlib
 from pathlib import Path
@@ -14,9 +14,9 @@ def restore_parent_prompt(source):
     lines[node.lineno - 1:node.end_lineno] = ['REMIND_FIRST_SYSTEM = """' + PARENT_SYSTEM + '"""\n']
     return ''.join(lines)
 
-def test_only_system_prompt_changes_from_tool_contract_parent():
+def test_prompt_guided_source_snapshot():
     source = Path(module.__file__).read_text()
-    assert hashlib.sha256(restore_parent_prompt(source).encode()).hexdigest() == '7f6c4beebe71348faa598353e417a74ea9b508a1a032873f4f59030b05003c4c'
+    assert hashlib.sha256(restore_parent_prompt(source).encode()).hexdigest() == 'f5a8d15d0520c89f8641be29ccbe1ff8248fbd50eb1fcaa8662b464c60fffb2c'
 
 def test_complete_selected_information_without_new_execution_rules():
     prompt = module.REMIND_FIRST_SYSTEM
@@ -26,7 +26,4 @@ def test_complete_selected_information_without_new_execution_rules():
     for removed in ["available during step 2", "The reminder decision has already been recorded",
                     "When the program advances", "No completion tag is required"]:
         assert removed not in prompt
-    assert module.ORGANIZE_START_PROMPT == (
-        "The reminder decision is recorded. Now predict and save information for this wake "
-        "(step 2). It will not change the recorded reminder. When finished, reply in ordinary "
-        "text without a tool call; no completion tag is needed.")
+    assert not hasattr(module, "ORGANIZE_START_PROMPT")

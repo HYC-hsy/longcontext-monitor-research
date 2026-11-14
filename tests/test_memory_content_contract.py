@@ -30,16 +30,15 @@ def test_schema_changes_only_descriptions_and_leaves_shared_add_tools_untouched(
 def test_real_loop_payload_and_multiple_verbatim_saves():
     bodies = ['原始条件：X 使用全部列；H 使用前两列。\n```python\nX = data[:, :]\nH = X[:, :2]\n```',
               'Formula: y = Xβ + ε\nLiteral tags: <context_for_action>example</context_for_action>\n' * 90]
-    agent = module.RemindFirstMemoryAgent(llm=Script(read(), decision(), response(
+    agent = module.RemindFirstMemoryAgent(llm=Script(read(), response(
         *(call('memory_add', {'content': text}, f'add-{i}') for i, text in enumerate(bodies)),
-        content='Selected complete inputs. THIS COMMENT IS NOT SAVED.'), done()))
+        content='<no_intervention/> Selected complete inputs. THIS COMMENT IS NOT SAVED.'), done()))
     result = run(agent)
     assert [op.action for op in result.operations] == ['read', 'add', 'add']
     assert all(op.success for op in result.operations)
     assert [entry['content'] for entry in agent.memory.to_dict()['knowledge']] == bodies
-    for request in agent.llm.calls[:2]:
-        assert [tool['function']['name'] for tool in request['tools']] == ['memory_read']
-    for request in agent.llm.calls[2:]:
+    for request in agent.llm.calls:
+        assert [tool['function']['name'] for tool in request['tools']] == ['memory_add','memory_read']
         schema = request['tools'][0]['function']
         assert schema['description'] == TOOL_DESCRIPTION
         assert schema['parameters']['properties']['content']['description'] == CONTENT_DESCRIPTION
@@ -47,7 +46,7 @@ def test_real_loop_payload_and_multiple_verbatim_saves():
     assert not result.should_inject
 
 
-def test_exact_parent_source_except_two_description_assignments():
+def test_prompt_guided_source_with_tool_descriptions_normalized():
     source = Path(module.__file__).read_text()
     from test_complete_save_prompt import restore_parent_prompt
     source = restore_parent_prompt(source)
@@ -62,4 +61,4 @@ def test_exact_parent_source_except_two_description_assignments():
         replacement = ('BANK_TOOLS[0]["function"]["description"] = "Save information in the knowledge memory bank."\n'
                        if node is assignments[0] else '')
         lines[node.lineno-1:node.end_lineno] = [replacement]
-    assert hashlib.sha256(''.join(lines).encode()).hexdigest() == '42b6f13db1cd1280af16480129e1df817af9145c087b95ea4db22f18b0633b1c'
+    assert hashlib.sha256(''.join(lines).encode()).hexdigest() == 'ad21e6fdccf36b6f37e08483b6c281d9d9738e7c8f0fa4602fbfcdf81bf76b2f'

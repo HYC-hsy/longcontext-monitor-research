@@ -63,8 +63,8 @@ def nonprompt_digest(source):
     return hashlib.sha256(ast.dump(tree, include_attributes=False, **options).encode()).hexdigest()
 
 
-def test_runtime_matches_pinned_reminder_first_implementation():
-    assert nonprompt_digest(Path(module.__file__).read_text()) == 'b9c2144571180921a027b0a5876485aa6f1002501ea0a2bdfda15944580a63b6'
+def test_runtime_matches_pinned_prompt_guided_implementation():
+    assert nonprompt_digest(Path(module.__file__).read_text()) == 'dc255479a4006f18e11eb1781c838ad4c3e91ea0df6caca3e5c1091248a0af48'
 
 
 def test_nonprompt_guard_rejects_runtime_change():
