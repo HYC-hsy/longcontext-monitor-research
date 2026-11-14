@@ -50,8 +50,9 @@ def test_tag_and_save_in_same_response_are_independent():
 def test_final_summary_with_tag_finishes_without_retry(body):
     a=make(add(content='<no_intervention/>'),decision(body))
     result=run(a)
-    assert len(a.llm.calls)==2 and result.context_for_action==body
-    assert result.should_inject==(body is not None)
+    assert len(a.llm.calls)==2 and result.context_for_action is None
+    assert not result.should_inject
+    assert [r['decision_accepted'] for r in result.loop_rounds]==[True,False]
 
 def test_writing_before_read_or_decision_is_not_blocked():
     a=make(add(),read(),done())
@@ -69,9 +70,11 @@ def test_same_response_read_write_and_tag_all_handled():
     assert result.loop_rounds[0]['decision_accepted']
     assert len(a.llm.calls)==2
 
-def test_latest_decision_replaces_earlier_decision_without_stage_lock():
+def test_first_decision_is_kept_without_tool_stage_lock():
     a=make(add(content='<context_for_action>initial</context_for_action>'),decision('revised'))
-    assert run(a).context_for_action=='revised'
+    result=run(a)
+    assert result.context_for_action=='initial'
+    assert [r['decision_accepted'] for r in result.loop_rounds]==[True,False]
 
 def test_failure_receipt_does_not_cancel_independent_reminder():
     a=make(response(call('memory_add',{'content':''},'bad'),content='<context_for_action>old fact</context_for_action>'),done())
@@ -178,3 +181,29 @@ def test_archived_replies_expose_existing_parameter_error_not_stage_rejection(ca
     assert all(op.success for op in repaired.operations)
     assert [entry['content'] for entry in b.memory.to_dict()['knowledge']]==[
         json.loads(c['function']['arguments'])['content'] for c in case['tool_calls']]
+
+@pytest.mark.parametrize('case',json.loads((Path(__file__).parent/'fixtures/first_decision_replays.json').read_text()),ids=lambda c:c['task'])
+def test_real_first_decision_replay(case):
+    from memory_agent.memory.read_context_predictive_memory_agent import parse_final_decision
+    replies=[response(*[call(t['name'],json.loads(t['arguments']),t['id']) for t in r['tool_calls']],content=r['content']) for r in case['responses']]
+    a=make(*replies);result=run(a)
+    decisions=[parse_final_decision(r['content']) for r in case['responses']]
+    first=next(d for d in decisions if d[0] is not None)
+    assert result.should_inject==(first[0]=='context_for_action')
+    assert result.context_for_action==first[1]
+    assert sum(r['decision_accepted'] for r in result.loop_rounds)==1
+    assert all(tools(req)==['memory_add','memory_read'] for req in a.llm.calls)
+    assert all(op.success for op in result.operations)
+    assert len(result.operations)==sum(len(r['tool_calls']) for r in case['responses'])
+    assert len(a.llm.calls)==len(replies)
+
+
+def test_invalid_or_fenced_tags_do_not_claim_first_decision():
+    a=make(add(content='```xml\n<no_intervention/>\n```'),
+           add('second','a2',content='<context_for_action></context_for_action>'),
+           add('third','a3',content='<context_for_action>Keep code:\n```python\nx=1\n```</context_for_action>'),
+           decision())
+    result=run(a)
+    assert result.context_for_action=='Keep code:\n```python\nx=1\n```'
+    assert [r['decision_accepted'] for r in result.loop_rounds]==[False,False,True,False]
+    assert len(a.memory.knowledge)==3

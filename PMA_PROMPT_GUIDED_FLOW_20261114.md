@@ -6,7 +6,7 @@ The same manager and continuous native conversation remain. The system prompt st
 
 - Both `memory_read` and `memory_add` are available on every request.
 - Each response's reminder tag is extracted independently of its tool calls; tools run and their actual receipts return normally.
-- A later valid reminder decision replaces the earlier one. Missing or unparseable tags do not replace an existing decision. If no valid reminder was supplied, no text is injected; this is not evidence the model explicitly chose no intervention.
+- The first valid reminder/no-intervention decision per wake is retained. Later tags are still recorded but do not replace it; tools remain independent. Missing or unparseable tags do not claim the first decision. If no valid reminder was supplied, no text is injected; this is not evidence the model explicitly chose no intervention.
 - Tool calls continue the conversation with `Continue.`. A normally completed response without tool calls ends the wake, even if it repeats a reminder tag. No stage handoff, forced read, decision-lock, or stage-recovery messages are inserted.
 - The host still delivers the resulting reminder only after the wake completes. Existing native-history and transport error handling remain; tool argument validation and reminder code-body fidelity are unchanged.
 - No memory schema or scientific prediction criterion changed. No live Task/model/native evaluation was run.
@@ -32,3 +32,11 @@ export LITELLM_LOCAL_MODEL_COST_MAP=True
 python -m pytest -q tests/test_remind_first_loop.py tests/test_natural_reminder_transition.py tests/test_memory_content_contract.py tests/test_complete_save_prompt.py tests/test_remind_context_prompt.py tests/test_reminder_code_preservation.py tests/test_predictive_unified_wiring.py tests/test_predictive_unified_lifecycle.py tests/test_raw_task_trajectory.py
 python -m pytest -q tests/test_coherent_unified_prompt.py
 ```
+
+## First-decision follow-up
+
+Based on uploaded `5785edc4f0d7297afd60d7d0031c75a661cfdab1`, only decision acceptance changed. System prompt, tool schema, free tool execution, normal no-tool completion, and the existing tag parser are unchanged. The prompt asks for the reminder in step 1 and organization in step 2; it does not prevent a model from repeating a tag during organization. Such later tags no longer change the wake's decision. No new stage, retry, or validation gate was added.
+
+Offline exact-response replay uses the public five-task archive: RStan wake 4 (calls 5–7, context then no-intervention) retains the original reminder; ARC wake 12 (calls 11–14, no-intervention then context) retains no-intervention. The fixture includes original public text, tool arguments/IDs, source paths and file hashes. This is protocol replay, not a rerun of a Task or an evaluation of reminder quality. Additional tests cover fenced examples, preserved code payloads, same-response reminder plus save, tool errors, and reset on the next wake. Three source-hash guards are repinned for this authorized runtime change, separately from behavioral tests.
+
+Follow-up verification: **136 passed**, 3 dependency warnings, in the combined targeted suite above; `git diff --check` passed. No live model, Task, or native evaluation was started.

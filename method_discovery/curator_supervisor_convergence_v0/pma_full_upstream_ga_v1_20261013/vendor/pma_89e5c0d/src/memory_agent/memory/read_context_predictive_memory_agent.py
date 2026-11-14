@@ -426,8 +426,9 @@ class RemindFirstMemoryAgent(ReadContextPredictiveMemoryAgent):
     """Prompt-guided reminder then organization; tools and tags are independent.
 
     The class name remains the host's compatibility entry point. The program no
-    longer implements reminder/organization stages or freezes a reminder before
-    writes. Native tools, history, receipts and reminder transport are reused.
+    longer implements reminder/organization stages. The first valid reminder
+    decision per wake is retained independently of writes. Native tools, history,
+    receipts and reminder transport are reused.
     """
 
     def reset_conversation_history(self):
@@ -466,7 +467,8 @@ class RemindFirstMemoryAgent(ReadContextPredictiveMemoryAgent):
             self._phase1_operations.extend(operations)
             raw = getattr(response, "content", None) or ""
             kind, context = parse_final_decision(raw)
-            if kind is not None:
+            accepted = kind is not None and self._reminder_decision[0] is None
+            if accepted:
                 self._reminder_decision = (kind, context)
             completed = is_organize_completion(response)
             self._unified_rounds.append({
@@ -474,7 +476,7 @@ class RemindFirstMemoryAgent(ReadContextPredictiveMemoryAgent):
                 "prompt": user_prompt, "content": raw,
                 "operation_count": len(operations),
                 "tool_error": any(not op.success for op in operations),
-                "decision": kind, "decision_accepted": kind is not None,
+                "decision": kind, "decision_accepted": accepted,
                 "organize_completed": completed})
             self._p1_public_text_missing = not has_public_text(raw)
             if completed:

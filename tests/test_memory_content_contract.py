@@ -61,4 +61,4 @@ def test_prompt_guided_source_with_tool_descriptions_normalized():
         replacement = ('BANK_TOOLS[0]["function"]["description"] = "Save information in the knowledge memory bank."\n'
                        if node is assignments[0] else '')
         lines[node.lineno-1:node.end_lineno] = [replacement]
-    assert hashlib.sha256(''.join(lines).encode()).hexdigest() == 'ad21e6fdccf36b6f37e08483b6c281d9d9738e7c8f0fa4602fbfcdf81bf76b2f'
+    assert hashlib.sha256(''.join(lines).encode()).hexdigest() == 'd8628b55005ac3717d48424576d6232fe3fc6802360777fc26ba3f84c0cc2491'

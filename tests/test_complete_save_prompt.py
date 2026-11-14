@@ -16,7 +16,7 @@ def restore_parent_prompt(source):
 
 def test_prompt_guided_source_snapshot():
     source = Path(module.__file__).read_text()
-    assert hashlib.sha256(restore_parent_prompt(source).encode()).hexdigest() == 'f5a8d15d0520c89f8641be29ccbe1ff8248fbd50eb1fcaa8662b464c60fffb2c'
+    assert hashlib.sha256(restore_parent_prompt(source).encode()).hexdigest() == 'ddd5888f9aede68410093c64b74395f2966d07879dbd8a4b2a081803720bc1d5'
 
 def test_complete_selected_information_without_new_execution_rules():
     prompt = module.REMIND_FIRST_SYSTEM

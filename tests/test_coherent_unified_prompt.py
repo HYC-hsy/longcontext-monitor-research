@@ -64,7 +64,7 @@ def nonprompt_digest(source):
 
 
 def test_runtime_matches_pinned_prompt_guided_implementation():
-    assert nonprompt_digest(Path(module.__file__).read_text()) == 'dc255479a4006f18e11eb1781c838ad4c3e91ea0df6caca3e5c1091248a0af48'
+    assert nonprompt_digest(Path(module.__file__).read_text()) == '81fbc4f8bfabb096945557b859bd61dd8969d0e5d1edac34bcba50deddcf3e3c'
 
 
 def test_nonprompt_guard_rejects_runtime_change():
