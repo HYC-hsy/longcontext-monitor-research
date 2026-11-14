@@ -1,0 +1,60 @@
+{
+  "reminders": [
+    {
+      "task": "make-mips-interpreter",
+      "run_id": "pma-f0567a3a9c5548b0",
+      "actor_attempt": 5,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent has discovered critical ELF binary information from readelf output:\n- ELF32, little-endian MIPS R3000\n- Entry point: 0x400110\n- 5 program headers to load\n- MIPS32r2 with o32 ABI\n\nThe agent is exploring doomgeneric source files to understand the frame output interface. Key files found include doomgeneric.h, doomgeneric.c, and platform-specific implementations (doomgeneric_img.c may be relevant for frame saving).\n</memory_context>",
+      "request_ready_event_id": "evt_a5f5de123c8342b1b8e74a487a9ee356",
+      "provider_attempt": true
+    },
+    {
+      "task": "make-mips-interpreter",
+      "run_id": "pma-f0567a3a9c5548b0",
+      "actor_attempt": 45,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\n**CRITICAL BUGS TO FIX IMMEDIATELY:**\n\n1. **Frame Size Detection Error (Turn 43)**: \n   - Current code in sys_write: `if (count === 256000)`\n   - Correct value should be: `if (count === 1024000)`\n   - Doom uses 640×400 pixels, not 320×200\n   - Frame will NEVER be captured with wrong size detection\n\n2. **Instruction Limit Too Low**:\n   - Current: 100M instructions (hits limit before frame renders)\n   - Required: 500M+ instructions minimum\n   - Location: Around line 895-910 in main execution loop\n   - Variable name likely: `max_instructions` or `maxInstructions`\n   - Need to search file for this variable definition and increase value\n\n3. **sharp Library May Not Be Installed**:\n   - Just added `require('sharp')` to imports\n   - Must run `npm install sharp` before executing vm.js\n   - Or handle missing dependency gracefully\n\n**Recommended Action Sequence**:\n1. Find max_instructions variable definition (search entire vm.js file)\n2. Change from 100000000 to 500000000 (100M → 500M)\n3. Fix frame detection: change 256000 to 1024000 in sys_write method\n4. Install sharp: `npm install sharp` in /app directory\n5. Run `node vm.js` and monitor for frame output\n</memory_context>",
+      "request_ready_event_id": "evt_67992a546cf5470a841906c668ed42b1",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-ac2e495780e34950",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent is about to merge branch2 into branch1. Based on the saved information:\n\n1. **Merge conflict is certain**: Both branches modified algo.py with completely different implementations\n   - Branch1: function named \"map\", modulo 4 pattern, pure Python\n   - Branch2: function named \"transform\", modulo 3 pattern, uses numpy\n\n2. **Critical requirement**: Final algo.py MUST have function named \"map\" (not \"transform\")\n\n3. **Pattern analysis from examples.json**: \n   - All examples show modulo 3 repeating patterns in outputs\n   - Branch1 uses modulo 4 (likely WRONG)\n   - Branch2 uses modulo 3 (likely CORRECT pattern) but WRONG function name\n\n4. **Resolution strategy needed**: After merge conflict, the agent will need to:\n   - Keep function name \"map\" from branch1\n   - But implement modulo 3 logic from branch2\n   - Decide whether to use numpy or pure Python\n   - Test against all examples in /app/examples.json to verify correctness\n\nThe agent should proceed with the merge and be prepared to create a hybrid implementation combining the correct function name with the correct algorithm pattern.\n</memory_context>",
+      "request_ready_event_id": "evt_58e17c9bb7594f58a1aeb8b9165e37df",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-ac2e495780e34950",
+      "actor_attempt": 17,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent has resolved the merge conflict and written a new algo.py implementation. Based on the knowledge bank:\n\n**Current status:**\n- Merge conflict resolved with hybrid implementation\n- Function name \"map\" ✓ (requirement satisfied)\n- Uses modulo 3 pattern: (i - j) % 3 for collecting, (i + j) % 3 for filling\n- Pure Python implementation (no numpy dependency)\n\n**Critical next steps:**\n1. **Add the resolved file to git** (git add algo.py) - the merge is still in progress\n2. **Test the implementation** against all examples in /app/examples.json to verify correctness\n3. **Complete the merge commit** once testing confirms correctness\n\n**Important context from examples.json analysis:**\n- All 3 examples show modulo 3 repeating patterns in outputs\n- Output grids have NO zeros (full repeating patterns)\n- Values are extracted from non-zero input positions\n- The order/assignment of values to modulo keys matters for correctness\n\nThe agent needs to verify the implementation produces correct outputs before committing the merge.\n</memory_context>",
+      "request_ready_event_id": "evt_638cdef03905458bafa3818e0ad541e3",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-ac2e495780e34950",
+      "actor_attempt": 21,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent is debugging the pattern-matching algorithm and has discovered that the (i-j)%3 collection approach is fundamentally wrong. The agent needs to know:\n\n**Current Status:**\n- Merge is in progress (conflict not yet committed)\n- Current algo.py implementation FAILS all tests\n- The algorithm incorrectly uses (i-j)%3 for collection, causing value collisions\n\n**Critical Pattern Discovery from Analysis:**\nThe correct algorithm should:\n1. Extract ALL unique non-zero values from input (not collect by modulo keys)\n2. Map these 3 unique values to output positions by (i+j)%3\n3. The mapping rule between sorted values [smallest, middle, largest] and output keys {0, 1, 2} needs to be determined\n\n**Observed mappings to solve:**\n- Example 1: sorted [1, 2, 4] → output keys {0→2, 1→4, 2→1}\n  - Pattern: middle→key0, largest→key1, smallest→key2\n- Example 2: sorted [2, 3, 8] → output keys {0→2, 1→8, 2→3}\n  - Pattern: smallest→key0, largest→key1, middle→key2\n- Example 3: sorted [3, 4, 8] → output keys {0→4, 1→8, 2→3}\n  - Pattern: middle→key0, largest→key1, smallest→key2\n\n**Next Action:** The agent should analyze the relationship between sorted values and their assignment to discover the pattern, then implement the correct algorithm.\n</memory_context>",
+      "request_ready_event_id": "evt_980acb388fe74b01970c8876445ef77a",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-ac2e495780e34950",
+      "actor_attempt": 25,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe agent has discovered the CORRECT algorithm in round 23 that passes all test cases:\n\n**Correct Algorithm:**\n1. Scan input row-by-row, left-to-right\n2. Record FIRST occurrence position (i,j) for each unique non-zero value\n3. Map each value to output key using (i+j)%3 of its first occurrence\n4. Fill output grid by looking up values using (i+j)%3 for each position\n\nThis was validated - all 3 examples match perfectly.\n\n**Current Status:** \n- Merge is in progress but not committed\n- Current algo.py has the WRONG implementation (the failed (i-j)%3 approach)\n- Need to: implement correct algorithm → test → git add algo.py → git commit\n\n**Do NOT use (i-j)%3 for collection** - this was tested extensively in rounds 17-22 and fails because it causes value collisions.\n</memory_context>",
+      "request_ready_event_id": "evt_842f595d05e54983be464d60530848a5",
+      "provider_attempt": true
+    },
+    {
+      "task": "reshard-c4-data",
+      "run_id": "pma-4923ab11de3842dc",
+      "actor_attempt": 9,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nThe task agent should now proceed with testing the scripts. Both compress.py and decompress.py have been created, and the uv environment is set up. The test plan is:\n1. Run compress on c4_sample/ (9,898 files) to test_output/\n2. Verify the resharding created ~330 shard directories\n3. Run decompress on test_output/ to restore original structure\n4. Verify all 9,898 files are restored correctly\n\nKey expectation: Since all files are under 15MB, only directory resharding will be triggered (not file splitting).\n</memory_context>",
+      "request_ready_event_id": "evt_e6a98761d580419ca32dc86807c7bc90",
+      "provider_attempt": true
+    }
+  ]
+}
