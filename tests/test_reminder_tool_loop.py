@@ -147,3 +147,10 @@ def test_provider_truncation_after_recording_fails_without_result(provider,monke
     with pytest.raises(GAHistoryIntegrityError):run(a)
     assert a._recorded_reminders==['Not delivered']
     assert not any(x['wake_completed'] for x in a._unified_rounds)
+
+
+def test_prompt_and_schema_explain_ordered_nonreplacing_reminders():
+    from memory_agent.memory.reminder_tool_memory_agent import REMINDER_TOOL
+    wording='All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder.'
+    assert wording in REMINDER_TOOL_SYSTEM
+    assert wording in REMINDER_TOOL['function']['description']

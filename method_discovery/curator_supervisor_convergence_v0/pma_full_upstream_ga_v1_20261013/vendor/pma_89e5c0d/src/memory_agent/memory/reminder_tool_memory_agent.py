@@ -11,7 +11,7 @@ from .read_context_predictive_memory_agent import (
 REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     '- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.',
     '- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.\n'
-    '- send_reminder: Record information to remind the task agent of. The program delivers recorded reminders after this wake ends.'
+    '- send_reminder: Record information to remind the task agent of. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder.'
 ).replace(
     'Express the reminder decision with one of:\n<context_for_action>\nInformation to remind the task agent of.\n</context_for_action>\n<no_intervention/>',
     'If a reminder is needed, call send_reminder with its content. Otherwise, do not call it.'
@@ -20,7 +20,7 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
 REMINDER_TOOL = {
     'type': 'function', 'function': {
         'name': 'send_reminder',
-        'description': 'Record a reminder for the task agent. Recorded reminders are delivered in order after this wake ends; this call does not deliver them immediately.',
+        'description': 'Record a reminder for the task agent. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder. This call does not deliver them immediately.',
         'parameters': {'type': 'object', 'properties': {
             'content': {'type': 'string', 'description': 'The complete reminder text for the task agent. It may include original text, code, or formulas.'}
         }, 'required': ['content'], 'additionalProperties': False},

@@ -1,6 +1,6 @@
 # Profiled Claude manager call retries
 
-Parent: `e5fcdb435b3c7e9380d15ed540cb8af312319662`. This branch ports the bounded Claude request retry from `a7b6fa250ef2a30a86fa76440d792987bade4852` onto the independent reminder-tool variant. The send_reminder loop, prompt, tools, knowledge mirror and path notice remain unchanged. No Task, model, or evaluation was run.
+Parent: `e5fcdb435b3c7e9380d15ed540cb8af312319662`. This branch ports the bounded Claude request retry from `a7b6fa250ef2a30a86fa76440d792987bade4852` onto the independent reminder-tool variant. The send_reminder loop, tool contracts, knowledge mirror and path notice remain unchanged; the prompt and tool description clarify ordered nonreplacement as described below. No Task, model, or evaluation was run.
 
 ## Change and limits
 
@@ -27,4 +27,4 @@ Use the existing unified experiment runner and a fresh run directory/identity fo
 
 ## Combined-variant verification
 
-240 focused tests passed, 1 historical integration test explicitly deselected because its imported causal_reminder_turn30_20261007 module is unavailable in this workspace. Tests additionally cover a successful reminder+add batch followed by two disconnected requests and recovery without replaying either tool, and exhaustion after that batch with no pending Task reminder. The knowledge mirror contains one entry. Public step export now preserves actual unified/remind_first/reminder_tool loop_mode, loop_rounds and termination (the older exporter only projected unified). Source identity additionally covers the unchanged task_knowledge_file.py. Prompt, schema, native tool batch handling, history compression, GA and mirror implementation remain byte-identical to e5.
+241 focused tests passed, 1 historical integration test explicitly deselected because its imported causal_reminder_turn30_20261007 module is unavailable in this workspace. Tests additionally cover a successful reminder+add batch followed by two disconnected requests and recovery without replaying either tool, and exhaustion after that batch with no pending Task reminder. The knowledge mirror contains one entry. Public step export now preserves actual unified/remind_first/reminder_tool loop_mode, loop_rounds and termination (the older exporter only projected unified). Source identity additionally covers the unchanged task_knowledge_file.py. Native tool batch handling, history compression, GA and mirror implementation remain byte-identical to e5. The system prompt and send_reminder schema description additionally clarify the user-approved existing behavior: every successful reminder is delivered in call order after normal wake completion, without replacement.

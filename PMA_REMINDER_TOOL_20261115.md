@@ -22,7 +22,7 @@ The <task_description> tags contain the task agent's original task, and the <tas
 ## Tools
 - memory_add: Save information in the knowledge bank.
 - memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
-- send_reminder: Record information to remind the task agent of. The program delivers recorded reminders after this wake ends.
+- send_reminder: Record information to remind the task agent of. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder.
 
 ## Action Principles
 - Before expressing the reminder decision, briefly explain your judgment.
@@ -47,7 +47,7 @@ When finished, reply in ordinary text without calling a tool to end this wake.
 ### 工具
 - memory_add：向知识库保存信息。
 - memory_read：读取知识库中当前保存的全部信息。调用时将 bank_id 设为 knowledge。
-- send_reminder：记录要提醒任务 Agent 的信息。程序在本次唤醒结束后送达已记录的提醒。
+- send_reminder：记录要提醒任务 Agent 的信息。同一次唤醒中多次成功记录的提醒，均按调用顺序在该唤醒正常结束后交付，不会覆盖之前的提醒。
 
 ### 行动原则
 - 表达提醒决定前，简短说明你的判断。
@@ -69,7 +69,7 @@ When finished, reply in ordinary text without calling a tool to end this wake.
   "type": "function",
   "function": {
     "name": "send_reminder",
-    "description": "Record a reminder for the task agent. Recorded reminders are delivered in order after this wake ends; this call does not deliver them immediately.",
+    "description": "Record a reminder for the task agent. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder. This call does not deliver them immediately.",
     "parameters": {
       "type": "object",
       "properties": {
