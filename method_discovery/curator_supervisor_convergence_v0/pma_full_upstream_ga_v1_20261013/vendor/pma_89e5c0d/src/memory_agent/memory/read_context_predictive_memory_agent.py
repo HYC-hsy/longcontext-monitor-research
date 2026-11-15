@@ -389,7 +389,7 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Carry out these steps in this same conversation:
 
-1. Recall and decide the reminder. Use memory_read to read the existing knowledge bank. After receiving its result, consider the conversation context. You must judge how the information in the knowledge bank relates to the task agent's current and upcoming work, and whether that information can help with the current work. Based on this judgment, decide whether to remind the task agent and what to remind it of, and briefly explain your judgment before expressing the reminder decision. Express the reminder decision with one of:
+1. Recall and decide the reminder. Use memory_read to read the existing knowledge bank. After receiving its result, consider the conversation context and the task agent's execution trajectory. You must judge which information in the knowledge bank is worth presenting to the task agent for its current or upcoming work, and accordingly decide whether to remind the task agent and what to remind it of. Before expressing the reminder decision, briefly explain your judgment. Express the reminder decision with one of:
 <context_for_action>
 Information to remind the task agent of.
 </context_for_action>
