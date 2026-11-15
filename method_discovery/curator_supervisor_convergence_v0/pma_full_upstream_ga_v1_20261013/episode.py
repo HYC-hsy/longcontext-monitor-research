@@ -194,6 +194,7 @@ class PMAEpisode:
         self.task_id = task_id
         self.archive = archive
         self.archive.mkdir(parents=True, exist_ok=False)
+        self.task_knowledge_file = None
         self.started = False
         self.ended = False
         self.finalization_attempted = False
@@ -344,6 +345,8 @@ class PMAEpisode:
                         self.agent._memory.delete_bound(entry.id, cycle_id="episode_reset")
                 else:
                     entries.clear()
+        if self.task_knowledge_file is not None:
+            self.task_knowledge_file.publish()
         self.agent._accumulate_step(step=1, observation=text)
         if getattr(self.agent, "_research_candidate", None) in {"pma_predictive_f838_v1", "pma_predictive_context_v1", "pma_predictive_read_context_v1"}:
             self.started = True
@@ -380,6 +383,8 @@ class PMAEpisode:
                 self.agent._pending_injection = None
                 candidate_agent.last_delivery_status = "invalid_reference_no_delivery"
         reminder = self.agent._get_memory_system_prompt()
+        if self.task_knowledge_file is not None:
+            reminder = self.task_knowledge_file.append_notice(reminder)
         return {"status": "reminder" if reminder else "silent", "reminder": reminder,
                 "actor_attempt": attempt, "delivery": "returned_not_confirmed_in_ga_request"}
 
@@ -558,6 +563,11 @@ class PMAEpisode:
         self.finalization_attempted = True
         try:
             self.agent.save_memory(str(self.archive / "memory.json"))
+            if self.task_knowledge_file is not None:
+                # Archive the actual exposed snapshot, including a stale snapshot
+                # after publication failure; never silently republish on shutdown.
+                (self.archive / "task_visible_memory.json").write_bytes(
+                    self.task_knowledge_file.path.read_bytes())
             if not all((self.archive / name).is_file() for name in
                        ("memory.json", "trajectory_memory.json")):
                 raise RuntimeError("upstream did not save both memory artifacts")

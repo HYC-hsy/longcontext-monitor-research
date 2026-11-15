@@ -363,6 +363,12 @@ def project_slot(directory: Path, target: Path, secrets: list[str]) -> dict:
                 f'pma_bank.{kind}[{n}].content')} for n, item in enumerate(bank.get(kind, []))]
                 for kind in ('knowledge', 'procedural')}})
 
+        visible_bank_path = base / 'task_visible_memory.json'
+        if visible_bank_path.is_file():
+            visible_bank = json.loads(visible_bank_path.read_text(encoding='utf-8'))
+            emit(visible_bank_path, 'task_visible_memory_public.json',
+                 projector.json_value(visible_bank, 'task_visible_memory'))
+
     native = status.get('native_result') or {}
     reports_file = run_root / 'archive/native_reports_checked.json'
     reports = json.loads(reports_file.read_text(encoding='utf-8'))
@@ -462,7 +468,7 @@ def archive(root: Path, target: Path, secrets: list[str], run_commit: str) -> di
         if path.name in {'research_events.jsonl', 'memory_payload.jsonl',
                          'memory_transport.jsonl', 'trajectory_memory.json',
                          'memory_response.jsonl', 'memory_tool_results.jsonl', 'memory_cycle.jsonl',
-                         'memory.json', 'live_result.json'}:
+                         'memory.json', 'task_visible_memory.json', 'live_result.json'}:
             continue
         excluded_files.append({'private_relative_path': relative,
             'bytes': path.stat().st_size, 'sha256': digest(path),

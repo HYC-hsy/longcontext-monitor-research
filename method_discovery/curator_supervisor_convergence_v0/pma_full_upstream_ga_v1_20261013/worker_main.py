@@ -320,6 +320,10 @@ async def serve(args: argparse.Namespace) -> None:
         agent._memory_llm.call = offline_memory
     episode = PMAEpisode(agent, run_id=args.run_id, task_id=args.task_id,
                          archive=private / "archive")
+    if args.research_candidate == 'pma_predictive_read_context_v1':
+        from task_knowledge_file import TaskKnowledgeFile
+        episode.task_knowledge_file = TaskKnowledgeFile(
+            agent._memory, responses, run_id=args.run_id, task_id=args.task_id)
     install_transport_audit(agent, episode.archive)
     dispatcher = EventDispatcher(episode, requests, responses,
                                  deadline_epoch=args.deadline_epoch)

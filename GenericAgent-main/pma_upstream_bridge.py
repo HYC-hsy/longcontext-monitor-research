@@ -1,7 +1,8 @@
 """Default-off GA-side client for the host PMA event protocol.
 
-Only public Task events cross this path.  PMA source, bank, logs and keys stay
-in the host worker.  A timed-out accepted event is never replayed.
+Public Task events and reminder receipts cross this path. PMA source, logs and
+keys stay in the host worker; an explicit knowledge projection is Task-readable
+on the responses mount.  A timed-out accepted event is never replayed.
 """
 
 from __future__ import annotations

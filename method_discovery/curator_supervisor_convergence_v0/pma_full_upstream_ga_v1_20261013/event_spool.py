@@ -1,4 +1,4 @@
-"""Small single-run file transport; host bank and raw logs are never in spool.
+"""Small single-run file transport; only the explicit Task-readable bank projection may join event receipts in spool.
 
 The caller supplies pre-created mount roots.  This module does not create a
 Docker container, select a host path for one, or retry an accepted event.
@@ -128,7 +128,7 @@ class EventDispatcher:
                 result = await self.episode.handle(request)
                 response = {"status": "ok", "result": result}
             except Exception as exc:
-                # Do not expose the bank, prompts, raw errors or credentials to GA.
+                # Do not expose prompts, raw errors or credentials in error receipts.
                 response = {"status": "error", "error_type": type(exc).__name__}
             except BaseException as exc:
                 # Fatal phase/history failures must still unblock an uncapped
