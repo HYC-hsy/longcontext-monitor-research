@@ -357,13 +357,18 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
                         raise ValueError("memory content must be nonempty text")
                     operation = MemoryOperation(action="add",
                         memory_id=self.memory.save_knowledge(content), content=content)
+                elif name == "send_reminder" and hasattr(self, "_record_reminder"):
+                    operation = self._record_reminder(args)
                 else:
-                    raise ValueError("unsupported tool; available tools: memory_add, memory_read")
+                    raise ValueError("unsupported tool; available tools: " + ", ".join(
+                        tool["function"]["name"] for tool in self.get_tools_schema()))
             except Exception as exc:
                 operation = MemoryOperation(action=name, success=False, error=str(exc))
             operations.append(operation)
             receipt = {"action": operation.action, "success": operation.success,
                        "memory_id": operation.memory_id, "error": operation.error}
+            if name == "send_reminder" and operation.success:
+                receipt.update(status="recorded", delivered=False, content=operation.content)
             if name == "memory_read" and operation.success:
                 receipt["content"] = operation.content
             results.append({"type": "tool_result", "tool_use_id": call_id,

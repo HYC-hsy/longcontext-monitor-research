@@ -47,7 +47,7 @@ def test_real_loop_payload_and_multiple_verbatim_saves():
     assert not result.should_inject
 
 
-def test_exact_parent_source_except_two_description_assignments():
+def test_native_reminder_extension_source_except_two_description_assignments():
     source = Path(module.__file__).read_text()
     from test_complete_save_prompt import restore_parent_prompt
     source = restore_parent_prompt(source)
@@ -62,4 +62,4 @@ def test_exact_parent_source_except_two_description_assignments():
         replacement = ('BANK_TOOLS[0]["function"]["description"] = "Save information in the knowledge memory bank."\n'
                        if node is assignments[0] else '')
         lines[node.lineno-1:node.end_lineno] = [replacement]
-    assert hashlib.sha256(''.join(lines).encode()).hexdigest() == '42b6f13db1cd1280af16480129e1df817af9145c087b95ea4db22f18b0633b1c'
+    assert hashlib.sha256(''.join(lines).encode()).hexdigest() == '144393b9849f0258509dfc0c7d365dd6777202a54da73c0bf220fe267f1565ea'

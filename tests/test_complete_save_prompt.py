@@ -14,9 +14,9 @@ def restore_parent_prompt(source):
     lines[node.lineno - 1:node.end_lineno] = ['REMIND_FIRST_SYSTEM = """' + PARENT_SYSTEM + '"""\n']
     return ''.join(lines)
 
-def test_only_system_prompt_changes_from_tool_contract_parent():
+def test_system_prompt_and_native_reminder_extension_source_fingerprint():
     source = Path(module.__file__).read_text()
-    assert hashlib.sha256(restore_parent_prompt(source).encode()).hexdigest() == '7f6c4beebe71348faa598353e417a74ea9b508a1a032873f4f59030b05003c4c'
+    assert hashlib.sha256(restore_parent_prompt(source).encode()).hexdigest() == 'bf4c1a804b00751d58bf40cae0d6f3771de00a7cf7d204c787b1c89004798b61'
 
 def test_complete_selected_information_without_new_execution_rules():
     prompt = module.REMIND_FIRST_SYSTEM

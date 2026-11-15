@@ -203,7 +203,7 @@ def test_unsupplied_context_and_changed_task_rejected():
 
 
 @pytest.mark.parametrize('candidate,expected', [
-    (CANDIDATE, 'RemindFirstMemoryAgent'),
+    (CANDIDATE, 'ReminderToolMemoryAgent'),
     ('pma_predictive_context_v1', 'ContextPredictiveMemoryAgent'),
     ('pma_predictive_f838_v1', 'MemoryAgent'),
 ])

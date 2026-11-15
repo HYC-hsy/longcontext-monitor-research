@@ -249,9 +249,10 @@ def test_host_only_receives_frozen_reminder_after_organization_completed(tmp_pat
     from episode import construct_upstream
     host=construct_upstream(tmp_path/'agent',research_candidate='pma_predictive_read_context_v1',
                             memory_api_key='synthetic',memory_api_base='https://example.invalid')
-    assert type(host._memory_agent).__name__=='RemindFirstMemoryAgent'
+    assert type(host._memory_agent).__name__=='ReminderToolMemoryAgent'
     pending=[]
-    replies=iter([read(),decision('Old fact.\n```python\nx=1\n```'),add(),done()])
+    from test_reminder_tool_loop import remind
+    replies=iter([read(),remind('Old fact.\n```python\nx=1\n```'),add(),done()])
     async def llm_call(**kwargs):
         pending.append(host._pending_injection)
         return next(replies)
@@ -270,7 +271,8 @@ def test_host_failure_after_latch_never_queues_reminder(tmp_path):
     from episode import construct_upstream
     host=construct_upstream(tmp_path/'agent',research_candidate='pma_predictive_read_context_v1',
                             memory_api_key='synthetic',memory_api_base='https://example.invalid')
-    script=Script(read(),decision('Do not enqueue.'),add(),RuntimeError('failure'))
+    from test_reminder_tool_loop import remind
+    script=Script(read(),remind('Do not enqueue.'),add(),RuntimeError('failure'))
     host._memory_llm.call=script.call
     host._memory_agent.set_phase1_context(task='original',trajectory='')
     host._task_description='original'

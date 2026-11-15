@@ -9,7 +9,8 @@ import pytest
 
 from memory_agent.memory.universal_memory import UniversalMemory
 from task_knowledge_file import TaskKnowledgeFile, KnowledgePublicationError, TASK_MEMORY_PATH, TASK_MEMORY_NOTICE
-from test_remind_first_loop import read, add, decision, done
+from test_remind_first_loop import read, add, done
+from test_reminder_tool_loop import remind as decision
 from test_predictive_tool_recovery import block_network  # noqa: F401
 
 

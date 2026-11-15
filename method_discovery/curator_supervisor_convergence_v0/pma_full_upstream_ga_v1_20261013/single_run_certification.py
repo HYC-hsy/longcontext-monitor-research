@@ -99,6 +99,8 @@ READ_CONTEXT_PREDICTIVE_SOURCE_FILES = CONTEXT_PREDICTIVE_SOURCE_FILES + (
     "vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py",
     "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
     "responses_memory_llm.py",
+    "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
+    "vendor/pma_89e5c0d/src/memory_agent/memory/reminder_tool_memory_agent.py",
 )
 EVIDENCE_FILES = (
     'execution_identity.json',

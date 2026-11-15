@@ -20,10 +20,10 @@ async def exercise(fail, root, monkeypatch):
             agent=original_construct(*a,**kw)
             async def failing(*,prompt,**kwargs):
                 manager=agent._memory_agent
-                if manager._wake_stage=='remind':
-                    if not manager._reminder_bank_read:
-                        return SimpleNamespace(content='Read.',tool_calls=[SimpleNamespace(id='read',function=SimpleNamespace(name='memory_read',arguments={'bank_id':'knowledge'}))])
-                    return SimpleNamespace(content='<context_for_action>Never deliver on failure.</context_for_action>',tool_calls=[])
+                if not any(op.action=='read' for op in manager._phase1_operations):
+                    return SimpleNamespace(content='Read.',tool_calls=[SimpleNamespace(id='read',function=SimpleNamespace(name='memory_read',arguments={'bank_id':'knowledge'}))])
+                if not any(op.action=='send_reminder' for op in manager._phase1_operations):
+                    return SimpleNamespace(content='Judged.',tool_calls=[SimpleNamespace(id='reminder',function=SimpleNamespace(name='send_reminder',arguments={'content':'Never deliver on failure.'}))])
                 if not any(op.action=='add' for op in manager._phase1_operations):
                     return SimpleNamespace(content='Save.',tool_calls=[SimpleNamespace(id='saved',function=SimpleNamespace(name='memory_add',arguments={'content':'partially saved'}))])
                 raise RuntimeError('synthetic provider failure')
@@ -66,7 +66,7 @@ async def exercise(fail, root, monkeypatch):
         bank=json.loads((audit/'memory.json').read_text())
         assert len(bank['knowledge'])==2
         steps=json.loads((audit/'trajectory_memory.json').read_text())['steps']
-        assert len(steps)==2 and all(x['loop_mode']=='remind_first' and len(x['loop_rounds'])==4 for x in steps)
+        assert len(steps)==2 and all(x['loop_mode']=='reminder_tool' and len(x['loop_rounds'])==4 for x in steps)
         assert all(x['raw_response_phase2']==x['user_prompt_phase2']=='' for x in steps)
         assert json.loads((private/'worker_exit.json').read_text())['task_end_saved']
     print(json.dumps({'case':'failure' if fail else 'success','status':'passed','path':str(root)}))
