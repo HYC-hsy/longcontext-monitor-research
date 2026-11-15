@@ -164,10 +164,13 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
         agent._research_candidate = research_candidate
     if memory_profile is not None and memory_profile["model"] in CLAUDE_MODELS:
         # Transport-only adaptation. The upstream memory prompts, bank, trigger,
-        # two-phase process, and LiteLLM retry decorator remain unchanged.
+        # memory semantics remain unchanged. This profile owns bounded retries.
         memory_llm = agent._memory_llm
         memory_llm._reasoning_effort = memory_profile["reasoning_effort"]
         original_call = memory_llm.call
+        # Bypass the fixed three-attempt decorator, not the Harbor adapter.
+        single_attempt = original_call.__wrapped__
+        from claude_memory_retry import call_with_retries
 
         async def profiled_call(*, prompt, system, tools=None, message_history=None):
             kwargs = dict(prompt=prompt, system=system, tools=tools,
@@ -176,7 +179,10 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                           timeout=memory_profile["read_timeout"])
             if message_history is not None:
                 kwargs["message_history"] = message_history
-            return await original_call(**kwargs)
+            async def attempt(**request):
+                return await single_attempt(memory_llm, **request)
+            return await call_with_retries(attempt, max_retries=memory_profile.get("max_retries", 2),
+                observer=getattr(memory_llm, "_pma_retry_observer", None), **kwargs)
 
         memory_llm.call = profiled_call
     return agent
