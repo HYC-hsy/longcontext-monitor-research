@@ -392,7 +392,8 @@ The <task_description> tags contain the task agent's original task, and the <tas
 - memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
 
 ## Action Principles
-- Before each tool call, briefly explain your judgment; when calling memory_add, state which information you have selected.
+- Before expressing the reminder decision, briefly explain your judgment.
+- Before calling memory_add, briefly state which information you have selected.
 - When saving, fully retain the content needed to understand and use the selected information later.
 
 Manage task information through the following steps:
