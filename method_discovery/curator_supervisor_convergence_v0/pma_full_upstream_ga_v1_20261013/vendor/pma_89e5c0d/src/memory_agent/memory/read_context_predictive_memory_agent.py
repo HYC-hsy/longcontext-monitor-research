@@ -398,7 +398,7 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Manage task information through the following steps:
 
-1. Judge and decide the reminder. You must use memory_read to carefully review the existing knowledge bank. After receiving its result, consider the conversation context and the task agent's execution trajectory. You must judge which information in the knowledge bank, as the task progresses, has become valuable or remains valuable for the task agent's current or upcoming work, and accordingly decide whether to remind the task agent and what to remind it of. Express the reminder decision with one of:
+1. Judge and decide the reminder. You must use memory_read to carefully review the existing knowledge bank. After receiving its result, consider the task agent's execution trajectory. You must judge which information in the knowledge bank, as the task progresses, has become valuable or remains valuable for the task agent's current or upcoming work, and accordingly decide whether to remind the task agent and what to remind it of. Express the reminder decision with one of:
 <context_for_action>
 Information to remind the task agent of.
 </context_for_action>
