@@ -22,7 +22,7 @@ def test_complete_selected_information_without_new_execution_rules():
     prompt = module.REMIND_FIRST_SYSTEM
     assert "after the task has progressed for another eight turns" in prompt
     assert "fully retain the content needed to understand and use the selected information later" in prompt
-    assert "Before saving, briefly state which information you have selected." in prompt
+    assert "when calling memory_add, state which information you have selected." in prompt
     for removed in ["available during step 2", "The reminder decision has already been recorded",
                     "When the program advances", "No completion tag is required"]:
         assert removed not in prompt

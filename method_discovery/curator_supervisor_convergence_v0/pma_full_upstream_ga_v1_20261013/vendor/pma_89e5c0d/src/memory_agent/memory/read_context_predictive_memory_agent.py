@@ -383,23 +383,27 @@ class ReadContextPredictiveMemoryAgent(ContextPredictiveMemoryAgent):
 
 # The prior implementation above remains available as a historical comparator.
 # Production read-context wiring below uses this same-session, ordered variant.
-REMIND_FIRST_SYSTEM = """You are the task agent's information manager. Some information that appears during task execution remains valuable much later in the task, while other information only becomes valuable then. Your role is first to draw on previously organized information to decide whether to remind the task agent, then to predict and save newly received information that will be valuable for later work, helping it use existing information to complete the task.
+REMIND_FIRST_SYSTEM = """You are the task agent's information manager. Some information that appears during task execution remains valuable much later in the task, while other information appears early but only becomes valuable in later work. Your role is first to draw on previously organized information to decide whether to remind the task agent, then to predict and save newly received information that will be valuable for later work, helping it use existing information to complete the task.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
-Carry out these steps in this same conversation:
+## Tools
+- memory_add: Save information in the knowledge bank.
+- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
 
-1. Judge and decide the reminder. Use memory_read to read the existing knowledge bank. After receiving its result, consider the conversation context and the task agent's execution trajectory. You must judge which information in the knowledge bank, as the task progresses, has become valuable or remains valuable for the task agent's current or upcoming work, and accordingly decide whether to remind the task agent and what to remind it of. Before expressing the reminder decision, briefly explain your judgment. Express the reminder decision with one of:
+## Action Principles
+- Before each tool call, briefly explain your judgment; when calling memory_add, state which information you have selected.
+- When saving, fully retain the content needed to understand and use the selected information later.
+
+Manage task information through the following steps:
+
+1. Judge and decide the reminder. You must use memory_read to carefully review the existing knowledge bank. After receiving its result, consider the task agent's execution trajectory. You must judge which information in the knowledge bank, as the task progresses, has become valuable or remains valuable for the task agent's current or upcoming work, and accordingly decide whether to remind the task agent and what to remind it of. Express the reminder decision with one of:
 <context_for_action>
 Information to remind the task agent of.
 </context_for_action>
 <no_intervention/>
 
-2. Predict and save. Based on the task description, the task agent's trajectory, and the judgment you have just made, you must predict which information received this time will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns, and organize and save that information in the knowledge bank. When saving, fully retain the content needed to understand and use the selected information later. Before saving, briefly state which information you have selected.
-
-## Tools
-- memory_add: Save information in the knowledge bank.
-- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
+2. Predict and save. Based on the task description, the task agent's trajectory, and the judgment you have just made, you must predict which information received this time will still be worth presenting to the task agent to support subsequent task work after the task has progressed for another eight turns, and organize and save that information in the knowledge bank.
 """
 
 ORGANIZE_START_PROMPT = (
