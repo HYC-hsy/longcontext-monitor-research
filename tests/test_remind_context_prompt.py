@@ -1,12 +1,12 @@
-"""Mandatory reminder judgment explanation; no runtime/lifecycle changes."""
+"""Reminder relevance and usefulness judgment; no runtime/lifecycle changes."""
 import hashlib
 from pathlib import Path
 from memory_agent.memory import read_context_predictive_memory_agent as module
 from test_remind_first_loop import make, read, decision, done, run
 
 OLD = "After receiving its result, based on the task agent's current and upcoming work, decide whether to remind it of information in that bank."
-NEW = "After receiving its result, consider the conversation context and compare relevant information in the knowledge bank with the task agent's current and upcoming work. You must judge whether to remind the task agent and what to remind it of, and briefly explain your judgment before expressing the reminder decision."
-SYSTEM_SHA256 = '5b8890affc47f7abdb3a32dec5a5c075ed186e84a231adedc4c892d8d6c411c6'
+NEW = "After receiving its result, consider the conversation context. You must judge how the information in the knowledge bank relates to the task agent's current and upcoming work, and whether that information can help with the current work. Based on this judgment, decide whether to remind the task agent and what to remind it of, and briefly explain your judgment before expressing the reminder decision."
+SYSTEM_SHA256 = 'e5d28f597de2bd0a783e7d309221630cb794839001153e431004380d4825240a'
 
 
 def test_approved_system_has_complete_save_guidance_and_same_reminder():
@@ -26,9 +26,9 @@ def test_context_and_bank_wording_reaches_all_requests_and_initialization_is_uni
 
 
 def test_only_reminder_sentence_changed_from_parent_system():
-    parent_sentence = "After receiving its result, consider the conversation context and compare relevant information in the knowledge bank with the task agent's current and upcoming work to decide whether to remind the task agent, and what to remind it of."
+    parent_sentence = "After receiving its result, consider the conversation context and compare relevant information in the knowledge bank with the task agent's current and upcoming work. You must judge whether to remind the task agent and what to remind it of, and briefly explain your judgment before expressing the reminder decision."
     parent = module.REMIND_FIRST_SYSTEM.replace(NEW, parent_sentence)
-    assert hashlib.sha256(parent.encode()).hexdigest() == '0e397e323abb83a9b479a0be802dc0a9ef771dd3a06bb765dd063069a867b169'
+    assert hashlib.sha256(parent.encode()).hexdigest() == '5b8890affc47f7abdb3a32dec5a5c075ed186e84a231adedc4c892d8d6c411c6'
 
 
 def test_explanation_before_no_intervention_is_accepted_without_extra_round():
