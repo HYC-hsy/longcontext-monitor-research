@@ -324,6 +324,11 @@ def project_slot(directory: Path, target: Path, secrets: list[str]) -> dict:
         # Per-call records matter for partial tool success and recoveries that
         # never reached a valid decision. Project known public fields only.
         for filename, public_name, fields in (
+            ('memory_retry_attempts.jsonl', 'pma_retry_attempts_public.json',
+             ('call_sequence', 'layer', 'event', 'attempt', 'max_retries',
+              'inner_retries_requested', 'underlying_http_attempts', 'started_epoch',
+              'ended_epoch', 'duration_seconds', 'exception_type', 'exception_status_code',
+              'observed_http_status', 'retry_delay_seconds', 'outcome')),
             ('memory_cycle.jsonl', 'pma_cycles_public.json',
              ('phase', 'cycle_step', 'outcome', 'error_type', 'loop_rounds', 'completed_epoch')),
             ('memory_response.jsonl', 'pma_responses_public.json',
@@ -340,9 +345,9 @@ def project_slot(directory: Path, target: Path, secrets: list[str]) -> dict:
         emit(trajectory_path, 'pma_steps_public.json', [{
             **{key: row.get(key) for key in ('step_id', 'timestamp', 'trigger_step',
                                              'step_count', 'observation_len', 'should_inject')},
-            **({'loop_mode': 'unified', 'termination': row.get('termination'),
+            **({'loop_mode': row.get('loop_mode'), 'termination': row.get('termination'),
                 'loop_rounds': projector.json_value(row.get('loop_rounds'),
-                    f'pma_step[{n}].loop_rounds')} if row.get('loop_mode') == 'unified' else {}),
+                    f'pma_step[{n}].loop_rounds')} if row.get('loop_mode') in {'unified', 'remind_first', 'reminder_tool'} else {}),
             'operations': [{key: projector.json_value(op.get(key),
                 f'pma_step[{n}].operation[{j}].{key}') for key in
                 ('action', 'memory_id', 'content', 'success', 'error')}
@@ -466,7 +471,7 @@ def archive(root: Path, target: Path, secrets: list[str], run_commit: str) -> di
             continue
         relative = path.relative_to(root).as_posix()
         if path.name in {'research_events.jsonl', 'memory_payload.jsonl',
-                         'memory_transport.jsonl', 'trajectory_memory.json',
+                         'memory_transport.jsonl', 'memory_retry_attempts.jsonl', 'trajectory_memory.json',
                          'memory_response.jsonl', 'memory_tool_results.jsonl', 'memory_cycle.jsonl',
                          'memory.json', 'task_visible_memory.json', 'live_result.json'}:
             continue

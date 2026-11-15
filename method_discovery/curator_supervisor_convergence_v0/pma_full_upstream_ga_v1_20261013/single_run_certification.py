@@ -75,6 +75,8 @@ EVIDENCE_GAP_SOURCE_FILES = GAP_SOURCE_FILES + tuple(
                          'vendor/langextract_3a68580/requirements.txt')
 )
 PREDICTIVE_SOURCE_FILES = SOURCE_FILES + (
+    "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
+    "claude_memory_retry.py",
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
     'episode.py',
     'method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/'
@@ -95,6 +97,8 @@ CONTEXT_PREDICTIVE_SOURCE_FILES = tuple(dict.fromkeys(PREDICTIVE_SOURCE_FILES + 
     'vendor/pma_89e5c0d/external/harbor/src/harbor/llms/lite_llm.py',
 )))
 READ_CONTEXT_PREDICTIVE_SOURCE_FILES = CONTEXT_PREDICTIVE_SOURCE_FILES + (
+    "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
+    "task_knowledge_file.py",
     "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
     "vendor/pma_89e5c0d/src/memory_agent/memory/read_context_predictive_memory_agent.py",
     "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"

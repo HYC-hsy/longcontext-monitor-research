@@ -39,6 +39,10 @@ def install_transport_audit(agent, archive: Path) -> None:
     """Observe actual model calls and tool receipts without adding requests."""
     original = agent._memory_llm.call
     calls = 0
+    def retry_observer(row):
+        append_private_audit(archive / "memory_retry_attempts.jsonl",
+                             {"call_sequence": calls, **row})
+    agent._memory_llm._pma_retry_observer = retry_observer
 
     async def audited_call(*, prompt, system, tools=None, message_history=None):
         nonlocal calls
