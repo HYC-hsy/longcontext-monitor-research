@@ -11,8 +11,10 @@ from test_predictive_tool_recovery import block_network  # noqa: F401
 
 
 EXPECTED_STEP = (
-    "2. Predict and save. Judging and organizing information may affect its value "
-    "and the value of other information for subsequent work. After completing the "
+    "2. Predict and save. The content produced when organizing information "
+    "substantially shapes the task agent's understanding of information it already "
+    "has, which in turn affects the value of other information for subsequent work. "
+    "After completing the "
     "reminder decision, based on the task description, the task agent's trajectory, "
     "and the judgment and reminder decision you have just made, you must predict "
     "which information received this time will still be worth presenting to the "
