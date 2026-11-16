@@ -1,0 +1,5 @@
+# Reminder-tool fixed version: five attempted slots
+
+Execution SHA: `3bbe7f2df3c2190a269eaf857b8c0183a350e66f`; dataset `2fd12b88aafdd04a52c298e3940bcb189f9766d6`; Harbor `459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`. One fresh attempt per task; no replay. Only the first slot completed native evaluation. The second failed after extensive Task execution; the remaining three were started contrary to the intended stop gate and failed before Task provider calls. See ENGINEERING_FAILURE_AND_CLEANUP.md and per-slot original results.
+
+This archive is a redacted visible projection, not original HTTP bytes or a restorable runtime. Private originals remain local. Excluded: credentials, private endpoints/profiles, provider-private thinking/signatures, hidden verifier bodies, and runtime source bundles. The external index maps local source hashes to projected member hashes. Task-readable knowledge files are included when present. Tool recording, Task request delivery, and explicit Task-side file reads are separately indexed; absence of an observed read is not proof that no indirect use occurred.
