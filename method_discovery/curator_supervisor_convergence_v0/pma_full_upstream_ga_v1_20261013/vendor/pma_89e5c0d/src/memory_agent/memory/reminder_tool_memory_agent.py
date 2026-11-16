@@ -26,9 +26,8 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
 ).replace(
     '2. Predict and save. Based on the task description, the task agent\'s trajectory, '
     'and the judgment you have just made,',
-    '2. Predict and save. The content produced when organizing information '
-    'substantially shapes the task agent\'s understanding of information it already '
-    'has, which in turn affects the value of other information for subsequent work. '
+    '2. Predict and save. Pieces of information affect one another\'s value. '
+    'Organize information only to the extent supported by the available information. '
     'After completing the '
     'reminder decision, based on the task description, the task agent\'s trajectory, '
     'and the judgment and reminder decision you have just made,'
