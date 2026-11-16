@@ -15,7 +15,21 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
 ).replace(
     'Express the reminder decision with one of:\n<context_for_action>\nInformation to remind the task agent of.\n</context_for_action>\n<no_intervention/>',
     'If a reminder is needed, call send_reminder with its content. Otherwise, do not call it.'
-) + '\nWhen finished, reply in ordinary text without calling a tool to end this wake.\n'
+).replace(
+    '- Before expressing the reminder decision, briefly explain your judgment.\n'
+    '- Before calling memory_add, briefly state which information you have selected.',
+    '- Before each tool call, briefly explain your judgment; when calling memory_add, '
+    'state which information you have selected.'
+).replace(
+    'Manage task information through the following steps:',
+    'Please manage task information in the following order:'
+).replace(
+    '2. Predict and save. Based on the task description, the task agent\'s trajectory, '
+    'and the judgment you have just made,',
+    '2. After completing the reminder decision, predict and save. Based on the task '
+    'description, the task agent\'s trajectory, and the judgment and reminder '
+    'decision you have just made,'
+)
 
 REMINDER_TOOL = {
     'type': 'function', 'function': {
