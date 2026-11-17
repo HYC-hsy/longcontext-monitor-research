@@ -24,17 +24,25 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     'Manage task information through the following steps:',
     'Please manage task information in the following order:'
 ).replace(
-    '2. Predict and save. Based on the task description, the task agent\'s trajectory, '
-    'and the judgment you have just made,',
-    '2. Predict and save. Pieces of information affect one another\'s value. '
-    'Organize information only to the extent supported by the available information. '
-    'After completing the '
-    'reminder decision, based on the task description, the task agent\'s trajectory, '
-    'and the judgment and reminder decision you have just made,'
+    '- When saving, fully retain the content needed to understand and use the selected information later.',
+    '- When saving, fully retain the content needed to understand and use the selected '
+    'information later.\n- Before each call to send_reminder, first call memory_read to '
+    'retrieve information from the knowledge bank.'
 ).replace(
-    'and organize and save that information in the knowledge bank.',
-    'and predict what content to produce when organizing that information to make '
-    'it most valuable for subsequent task work, then save it in the knowledge bank.'
+    "2. Predict and save. Based on the task description, the task agent's trajectory, and the"
+    ' judgment you have just made, you must predict which information received this time will'
+    ' still be worth presenting to the task agent to support subsequent task work after the '
+    'task has progressed for another eight turns, and organize and save that information in '
+    'the knowledge bank.',
+    "2. Predict and save. Pieces of information affect one another's value. Organize "
+    'information only to the extent supported by the available information. After completing '
+    "the reminder decision, you must consider the task description, the task agent's "
+    'execution trajectory, and the judgment and reminder decision you have just made, and '
+    'predict which information received this time will still be worth presenting to the task '
+    'agent after another eight turns to support its subsequent work; at the same time, '
+    'predict how to organize this information to best help it use the information to continue'
+    ' making judgments and advance the task. Based on these predictions, organize the information and '
+    'save it in the knowledge bank.'
 )
 
 REMINDER_TOOL = {
