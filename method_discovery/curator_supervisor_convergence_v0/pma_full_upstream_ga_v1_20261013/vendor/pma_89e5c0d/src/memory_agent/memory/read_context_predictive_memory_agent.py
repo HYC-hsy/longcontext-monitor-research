@@ -117,9 +117,9 @@ def parse_final_decision(raw):
 
 
 PUBLIC_FORECAST_REMINDER = (
-    "Briefly state which information you have selected that you predict will still "
-    "be worth presenting to the task agent to support subsequent task work after "
-    "the task has progressed for another eight turns.")
+    "Please use one or two sentences to explain which information you have selected "
+    "and why you judge that it will still be worth presenting to the task agent to "
+    "support subsequent work after the task has progressed for another eight turns.")
 
 
 def has_public_text(text):
