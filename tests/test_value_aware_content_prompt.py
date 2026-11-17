@@ -17,16 +17,18 @@ EXPECTED_STEP = (
     'which information received this time will still be worth presenting to the task agent to'
     ' support subsequent task work after the task has progressed for another eight turns. For'
     ' the selected information, faithfully organize its content and current state and save it'
-    ' in the knowledge bank. Organize information only to the extent supported by the '
-    'available information.\n'
+    ' in the knowledge bank.\n'
 )
 READ_BEFORE_REMINDER = '- Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.\n'
 
 def test_only_approved_prompt_parts_change_and_horizon_is_not_repeated():
     prefix, step = REMINDER_TOOL_SYSTEM.split('2. ', 1)
     assert prefix.count(READ_BEFORE_REMINDER) == 1
-    # Removing only the new rule recovers the pinned baseline prefix exactly.
-    baseline_prefix = prefix.replace(READ_BEFORE_REMINDER, '')
+    # Undo only the approved action-rule additions to recover the original prefix.
+    assert prefix.count('and the extent to which the available information supports it') == 1
+    baseline_prefix = prefix.replace(READ_BEFORE_REMINDER, '').replace(
+        'your judgment and the extent to which the available information supports it;',
+        'your judgment;')
     assert hashlib.sha256(baseline_prefix.encode()).hexdigest() == (
         'd29718385b7890d0bdf83736a94da6378cd005d7fa23b4599c0d2779c196c048')
     assert '2. ' + step == EXPECTED_STEP
@@ -66,4 +68,5 @@ def test_selected_information_is_faithful_not_an_extra_organization_forecast():
     assert 'predict how to organize' not in REMINDER_TOOL_SYSTEM
     assert 'Based on these predictions' not in REMINDER_TOOL_SYSTEM
     assert REMINDER_TOOL_SYSTEM.rstrip().endswith(
-        'Organize information only to the extent supported by the available information.')
+        'For the selected information, faithfully organize its content and current state and save it in the knowledge bank.')
+    assert 'Organize information only to the extent supported' not in REMINDER_TOOL_SYSTEM
