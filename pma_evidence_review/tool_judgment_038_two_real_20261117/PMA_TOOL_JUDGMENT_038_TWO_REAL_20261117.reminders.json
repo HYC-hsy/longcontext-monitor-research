@@ -1,0 +1,60 @@
+{
+  "reminders": [
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-212fce70db714961",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nGCC compiler now installed successfully at /usr/bin/gcc and /usr/bin/g++. The blocking issue for PyStan model compilation is resolved. You can now run the Python script /app/pystan_analysis.py to perform posterior sampling.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_d99618d7c5a740e7955e99d6b54f7c30",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-212fce70db714961",
+      "actor_attempt": 17,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nOutput file issue identified: rho_est.csv and beta_est.csv contain all 2000 samples instead of 3 posterior means.\n\nThe R script computes posterior means as (from knowledge bank):\n- alpha_post <- mean(post$alpha)  [scalar mean]\n- sigma_post <- mean(post$sigma)  [scalar mean]\n- rho_post <- colMeans(post$rho)  [column means of matrix, resulting in vector of 3]\n- beta_post <- colMeans(post$beta)  [column means of matrix, resulting in vector of 3]\n\nFor vector parameters (rho, beta): post$rho and post$beta are matrices with shape (samples, dimensions). colMeans() computes mean across samples for each dimension, producing vectors of length 3.\n\nIn Python with PyStan 3: fit['rho'] and fit['beta'] should be arrays with shape (2000, 3). You need np.mean(fit['rho'], axis=0) and np.mean(fit['beta'], axis=0) to get the 3 posterior means.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_0309b8828e154aff850d5973dfd7e4c7",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-212fce70db714961",
+      "actor_attempt": 21,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nCRITICAL DIAGNOSTIC FINDING from turn 20:\n- rho_est.csv and beta_est.csv have shape (2000,) - 1D arrays with 2000 scalar values\n- This means the saved arrays are flattened/1D, NOT (2000, 3) as expected\n- Expected: rho should be (2000, 3) matrix → axis=0 mean → (3,) vector\n- Actual: something wrong with fit['rho'] and fit['beta'] structure in PyStan 3\n\nROOT CAUSE HYPOTHESIS:\nfit['rho'] and fit['beta'] may already be flattened or have unexpected shape in PyStan 3.10.0 API.\n\nNEXT ACTION REQUIRED:\nAdd debug print statements to pystan_analysis.py BEFORE the mean computation to check:\n1. print(f\"fit['rho'] shape: {fit['rho'].shape}\")\n2. print(f\"fit['beta'] shape: {fit['beta'].shape}\")\n\nThis will reveal the actual structure of PyStan 3 fit object for vector parameters.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_b0d6a1aa0cb54bf890a9c8887a416a97",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-212fce70db714961",
+      "actor_attempt": 25,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nCRITICAL SUCCESS - PyStan 3 Vector Parameter API Understanding:\n\n**DISCOVERED BUG FIX (Turn 22-24):**\nPyStan 3.10.0 stores vector parameters with shape **(dimension, num_samples)** not **(num_samples, dimension)**\n\n**Diagnostic Output from Turn 22:**\n```\nfit['alpha'] shape: (1, 2000)    # scalar stored as (1, samples)\nfit['sigma'] shape: (1, 2000)    # scalar stored as (1, samples)\nfit['rho'] shape: (3, 2000)      # vector[3] stored as (3, samples) ← KEY FINDING\nfit['beta'] shape: (3, 2000)     # vector[3] stored as (3, samples) ← KEY FINDING\n```\n\n**CORRECT EXTRACTION METHOD:**\n```python\n# Wrong (was using axis=0):\nrho_means = np.mean(rho_samples, axis=0)  # gives (2000,) - mean of dimensions!\n\n# Correct (must use axis=1):\nrho_means = np.mean(rho_samples, axis=1)  # gives (3,) - mean across samples for each dimension\nbeta_means = np.mean(beta_samples, axis=1)  # gives (3,) - mean across samples for each parameter\n```\n\n**VERIFIED RESULTS (Turn 24):**\n- Posterior means shapes: rho_means (3,), beta_means (3,) ✓\n- Values: rho=[0.5816, 0.8901, 1.5044], beta=[-0.0516, -0.8221, 0.4245]\n- Script now produces correct output format\n\nThe fix has been applied at /app/pystan_analysis.py and executed successfully. Task should be complete.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_293b1d7d4c0345848e265e27561fb3e2",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-7117fcd001d148db",
+      "actor_attempt": 5,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nBUNDLE INSPECTION RESULTS:\n- bundle1.bundle: HEAD points to c8dca82d38e152cd58eb0b31394af08f37c1385a, also contains refs/heads/main at ef202c5435d34da584a73c5bde633ad0ce190fe7\n- bundle2.bundle: HEAD points to 836b057010803a50730966151008f40d7b9735ed, also contains refs/heads/main at ef202c5435d34da584a73c5bde633ad0ce190fe7\n\nNEXT STEPS: Fetch from HEAD references in both bundles into branch1 and branch2 respectively, then proceed with merge.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_36678e259afa430ea258b0a4242499e9",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-7117fcd001d148db",
+      "actor_attempt": 9,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nMERGE CONFLICT STATUS - IMMEDIATE ACTION NEEDED:\nMerge of branch2 into branch1 resulted in conflict in algo.py (expected).\n\nCURRENT FILE VERSIONS:\n- branch1 algo.py: Has function named \"map\" (correct name per requirements), uses mod 4 pattern, works with plain lists\n- branch2 algo.py: Has function named \"transform\" (wrong name), uses numpy, mod 3 pattern\n- branch2 also includes: requirements.txt (contains \"numpy\"), .DS_Store\n\nCONFLICT RESOLUTION STRATEGY:\nMust create algo.py with function named \"map\" (not \"transform\") that correctly implements the pattern from /app/examples.json. Neither existing version is correct based on the examples analysis. Need to:\n1. Read the conflicted algo.py to see merge markers\n2. Resolve by implementing correct \"map\" function based on examples.json pattern analysis\n3. Include requirements.txt and utils.py in final merge\n4. Test against all examples in /app/examples.json to verify correctness\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_89591b3c47314996915e094f7353af7e",
+      "provider_attempt": true
+    },
+    {
+      "task": "merge-diff-arc-agi-task",
+      "run_id": "pma-7117fcd001d148db",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nVERIFIED ALGORITHM DISCOVERED - ALL EXAMPLES PASS:\n\nThe correct map function pattern has been found and tested successfully on all 3 examples in /app/examples.json:\n\nALGORITHM:\n1. Extract unique non-zero values from input grid\n2. For each unique value, record the i+j coordinate sum of its FIRST appearance\n3. Sort values by their i+j sum (ascending order) to get base ordering\n4. Calculate rotation: rotation = (2 * min_ij_sum) % n, where min_ij_sum is the smallest i+j sum found, and n is the number of unique values\n5. Apply rotation to get final cycle: cycle = values[rotation:] + values[:rotation]\n6. Fill output grid: output[i][j] = cycle[(i+j) % n]\n\nThis formula works for all examples:\n- Example 1: values [1,2,4] at i+j=[8,9,10], min=8, rotation=(2*8)%3=1 → cycle [2,4,1] ✓\n- Example 2: values [2,8,3] at i+j=[0,1,2], min=0, rotation=(2*0)%3=0 → cycle [2,8,3] ✓  \n- Example 3: values [8,3,4] at i+j=[4,5,9], min=4, rotation=(2*4)%3=2 → cycle [4,8,3] ✓\n\nNEXT ACTIONS:\n1. Resolve merge conflict in /app/repo/algo.py by implementing this verified algorithm\n2. Use function name \"map\" (requirement specifies this name)\n3. Complete merge commit\n4. Run final verification against /app/examples.json\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_30caad3077be4beb9fcb7867c990a5fe",
+      "provider_attempt": true
+    }
+  ]
+}
