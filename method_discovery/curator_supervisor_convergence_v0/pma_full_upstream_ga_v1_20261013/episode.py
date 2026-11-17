@@ -17,7 +17,8 @@ from typing import Any
 from harbor.llms.base import BaseLLM, LLMResponse
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
 
-from pma_model_profile import CLAUDE_MODELS, OPENAI_MODELS, READ_CONTEXT
+from pma_model_profile import (CLAUDE_MODELS, OPENAI_MODELS, READ_CONTEXT,
+                               read_context_temperature)
 
 
 class DisabledActorLLM(BaseLLM):
@@ -63,6 +64,14 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
             raise ValueError("PMA model is not bound to the selected candidate")
         if not memory_profile.get("apibase") or not memory_profile.get("apikey"):
             raise ValueError("PMA memory profile lacks transport configuration")
+    # Scope the configurable default to this Claude manager only. Legacy and
+    # Responses paths retain their existing settings and validation.
+    configurable_temperature = (memory_profile is not None
+        and research_candidate == READ_CONTEXT
+        and memory_profile["model"] in CLAUDE_MODELS)
+    manager_temperature = (read_context_temperature(memory_profile)
+        if configurable_temperature else
+        memory_profile.get("temperature", 0.3) if memory_profile is not None else 0.3)
     actor = DisabledActorLLM()
     agent = MemoryEnabledTerminus2(
         logs_dir=logs_dir, model_name="disabled-actor-not-ga-task-model",
@@ -74,8 +83,7 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                          else memory_api_base),
         memory_api_key=(memory_profile["apikey"] if memory_profile is not None
                         else memory_api_key),
-        memory_temperature=(memory_profile.get("temperature", 0.3) if memory_profile is not None
-                            else 0.3), memory_max_thinking_tokens=None,
+        memory_temperature=manager_temperature, memory_max_thinking_tokens=None,
         memory_keep_thinking=False, memory_use_structured_tools=True,
         trigger_interval=1, trigger_on_first_step=True,
         sliding_window_size=pma_batch_rounds, reset_status_on_episode=True,
@@ -177,6 +185,10 @@ def construct_upstream(logs_dir: Path, *, memory_api_base: str | None = None,
                           max_tokens=memory_profile["max_tokens"],
                           thinking={"type": "adaptive"},
                           timeout=memory_profile["read_timeout"])
+            if configurable_temperature:
+                # Explicitly retain the configured value in each call/retry.
+                # Do not change drop_params, thinking, or the provider route.
+                kwargs["temperature"] = manager_temperature
             if message_history is not None:
                 kwargs["message_history"] = message_history
             async def attempt(**request):
