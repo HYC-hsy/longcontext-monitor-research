@@ -34,15 +34,14 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     ' still be worth presenting to the task agent to support subsequent task work after the '
     'task has progressed for another eight turns, and organize and save that information in '
     'the knowledge bank.',
-    "2. Predict and save. Pieces of information affect one another's value. Organize "
-    'information only to the extent supported by the available information. After completing '
-    "the reminder decision, you must consider the task description, the task agent's "
-    'execution trajectory, and the judgment and reminder decision you have just made, and '
-    'predict which information received this time will still be worth presenting to the task '
-    'agent after another eight turns to support its subsequent work; at the same time, '
-    'predict how to organize this information to best help it use the information to continue'
-    ' making judgments and advance the task. Based on these predictions, organize the information and '
-    'save it in the knowledge bank.'
+    "2. Predict and save. Pieces of information affect one another's value. After completing "
+    "the reminder decision, based on the task description, the task agent's execution "
+    'trajectory, and the judgment and reminder decision you have just made, you must predict '
+    'which information received this time will still be worth presenting to the task agent to'
+    ' support subsequent task work after the task has progressed for another eight turns. For'
+    ' the selected information, faithfully organize its content and current state and save it'
+    ' in the knowledge bank. Organize information only to the extent supported by the '
+    'available information.'
 )
 
 REMINDER_TOOL = {
