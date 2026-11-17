@@ -14,6 +14,8 @@ import signal
 import time
 from types import SimpleNamespace
 
+import httpx
+
 from episode import PMAEpisode, construct_upstream
 from event_spool import EventDispatcher
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
@@ -35,10 +37,67 @@ def append_private_audit(path: Path, row: dict) -> None:
         raise PMAAuditIntegrityError("private PMA audit write failed") from exc
 
 
+def install_http_wire_audit(archive: Path, current_call: dict) -> None:
+    """Record only safe final HTTP fields; forward the request unchanged."""
+    original_send = httpx.AsyncClient.send
+    request_index = 0
+    attempts_by_call = {}
+
+    async def observed_send(client, request, *args, **kwargs):
+        nonlocal request_index
+        request_index += 1
+        call_sequence = current_call["value"]
+        attempts_by_call[call_sequence] = attempts_by_call.get(call_sequence, 0) + 1
+        row = {
+            "request_index": request_index,
+            "call_sequence": call_sequence,
+            "attempt_in_call": attempts_by_call[call_sequence],
+            "started_epoch": time.time(),
+            "route_kind": "anthropic_messages" if request.url.path.endswith("/messages")
+                          else "other_http_request",
+            "api_version": request.headers.get("anthropic-version"),
+        }
+        try:
+            body = json.loads(request.content)
+            if not isinstance(body, dict):
+                raise ValueError("request body is not an object")
+            tools = body.get("tools")
+            row.update({
+                "model": body.get("model"),
+                "temperature_present": "temperature" in body,
+                "temperature": body.get("temperature") if "temperature" in body else None,
+                "thinking": body.get("thinking"),
+                "output_config": body.get("output_config"),
+                "max_tokens": body.get("max_tokens"),
+                "tool_choice_present": "tool_choice" in body,
+                "tool_choice": body.get("tool_choice"),
+                "tool_names": [item.get("name") for item in tools]
+                              if isinstance(tools, list) else None,
+                "tools_sha256": hashlib.sha256(json.dumps(
+                    tools, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+                    if tools is not None else None,
+            })
+        except Exception as exc:
+            row["body_parse_error_type"] = type(exc).__name__
+        try:
+            response = await original_send(client, request, *args, **kwargs)
+        except BaseException as exc:
+            row.update({"transport_error_type": type(exc).__name__,
+                        "ended_epoch": time.time()})
+            append_private_audit(archive / "memory_http_wire.jsonl", row)
+            raise
+        row.update({"http_status": response.status_code, "ended_epoch": time.time()})
+        append_private_audit(archive / "memory_http_wire.jsonl", row)
+        return response
+
+    httpx.AsyncClient.send = observed_send
+
+
 def install_transport_audit(agent, archive: Path) -> None:
     """Observe actual model calls and tool receipts without adding requests."""
     original = agent._memory_llm.call
     calls = 0
+    current_call = {"value": None}
     def retry_observer(row):
         append_private_audit(archive / "memory_retry_attempts.jsonl",
                              {"call_sequence": calls, **row})
@@ -47,6 +106,7 @@ def install_transport_audit(agent, archive: Path) -> None:
     async def audited_call(*, prompt, system, tools=None, message_history=None):
         nonlocal calls
         calls += 1
+        current_call["value"] = calls
         candidate_agent = agent._memory_agent
         phase = (candidate_agent.transport_phase if getattr(agent, '_research_candidate', None)
                  in ('pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_read_context_v1')
@@ -115,6 +175,7 @@ def install_transport_audit(agent, archive: Path) -> None:
             status = type(exc).__name__
             raise
         finally:
+            current_call["value"] = None
             append_private_audit(archive / "memory_transport.jsonl", {
                 "phase": phase, "status": status,
                 "started_epoch": started, "ended_epoch": time.time()})
@@ -166,6 +227,8 @@ def install_transport_audit(agent, archive: Path) -> None:
                     'completed_epoch': time.time()})
 
         candidate.process = audited_process
+
+    return current_call
 
 
 def fake_evidence_gap_arguments(candidate_agent, prompt):
@@ -330,7 +393,9 @@ async def serve(args: argparse.Namespace) -> None:
         from task_knowledge_file import TaskKnowledgeFile
         episode.task_knowledge_file = TaskKnowledgeFile(
             agent._memory, responses, run_id=args.run_id, task_id=args.task_id)
-    install_transport_audit(agent, episode.archive)
+    current_call = install_transport_audit(agent, episode.archive)
+    if args.research_candidate == 'pma_predictive_read_context_v1' and not args.fake_memory:
+        install_http_wire_audit(episode.archive, current_call)
     dispatcher = EventDispatcher(episode, requests, responses,
                                  deadline_epoch=args.deadline_epoch)
     (private / "worker_ready.json").write_text(json.dumps({
