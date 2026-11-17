@@ -18,8 +18,9 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
 ).replace(
     '- Before expressing the reminder decision, briefly explain your judgment.\n'
     '- Before calling memory_add, briefly state which information you have selected.',
-    '- Before each tool call, briefly explain your judgment and the extent to which '
-    'the available information supports it; when calling memory_add, state which '
+    '- Before each tool call, you must use one or two sentences to explain your '
+    'judgment, the available information on which it is based, and the extent to '
+    'which that information supports it. When calling memory_add, also state which '
     'information you have selected.'
 ).replace(
     'Manage task information through the following steps:',
