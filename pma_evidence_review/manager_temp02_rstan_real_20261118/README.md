@@ -1,0 +1,7 @@
+# Temperature 0.2, one real RStan task — redacted visible projection
+
+Actual execution commit `57946b3dd244bf23efbd0275a5d0906ef228d6c9` adds an audit-only HTTP hook to fixed method commit `462c12a5fcb8b5370441bc5b6048660957ed7f71`. Dataset `2fd12b88aafdd04a52c298e3940bcb189f9766d6`; Harbor `459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc`. One Task episode, run ID `pma-bf5c047402224ff4`; no ARC or other temperature condition.
+
+The first background launcher attempt failed before importing experiment_runner, so it made zero Task/PMA model calls. The error logs are retained. The corrected launcher used the same still-unused prepared run ID for the only real episode. The final HTTP audit records model, temperature, thinking/output_config presence, tool names/choice, call sequence, HTTP attempt and status, never full request bodies. The profile declared adaptive/high, but the observed final HTTP bodies omitted thinking and output_config; server-side sampling and reasoning settings remain unknown.
+
+The ZIP is a redacted visible projection, not raw HTTP bytes or a restorable private runtime. Originals remain local. Credentials, private endpoint/profile contents, provider-private thinking/signatures, hidden verifier bodies and runtime source bundles are excluded. The index maps local source hashes to projected member hashes. Missing PMA token usage or response model IDs are unknown, not inferred. 143 zero-model targeted tests passed; output is included.

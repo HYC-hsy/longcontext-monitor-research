@@ -1,0 +1,52 @@
+{
+  "reminders": [
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-bf5c047402224ff4",
+      "actor_attempt": 1,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nTask Requirements Summary:\n- Install PyStan 3.10.0 (not cmdstanpy or cmdstanr)\n- Read R script at /app/gp_rstan.R to understand Stan model and hyperparameters\n- Create Python script /app/pystan_analysis.py that is functionally equivalent\n- Use random_seed=1 when calling stan.build\n- Load data files: /app/train_X.csv, /app/train_y.csv, /app/test_X.csv, /app/meta_public.json\n- Save results to CSV files with only numeric values:\n  * /app/alpha_est.csv: single number (posterior mean of alpha)\n  * /app/sigma_est.csv: single number (posterior mean of sigma)\n  * /app/rho_est.csv: 3 numbers, one per row (posterior means of rho vector)\n  * /app/beta_est.csv: 3 numbers, one per row (posterior means of beta vector)\n\nNext steps to complete the task:\n1. First, install PyStan 3.10.0\n2. Read the R script /app/gp_rstan.R to extract the Stan model code and understand the hyperparameters\n3. Convert to Python script /app/pystan_analysis.py ensuring functional equivalence\n4. Remember: use random_seed=1 when calling stan.build\n5. Run the script and save posterior means to the 4 CSV files (alpha_est.csv, sigma_est.csv, rho_est.csv, beta_est.csv)\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_7e26771ac6a148e4a47735c0e6887992",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-bf5c047402224ff4",
+      "actor_attempt": 5,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nR script analysis completed:\n- Stan model: Gaussian Process with ARD (Automatic Relevance Determination) kernel\n- Sampling hyperparameters from R: chains=4, iter=2000, warmup=1000, thin=2, seed=1\n- Control parameters: adapt_delta=0.93, max_treedepth=14, adapt_gamma=0.05, adapt_kappa=0.75, adapt_t0=10, adapt_init_buffer=100, adapt_term_buffer=50, adapt_window=25, init_r=0.1\n- Metadata: P=3, jitter=1e-06\n- H matrix construction: cbind(1, train_X[,1], train_X[,2]) - intercept plus first two columns of X\n\nPython script created at /app/pystan_analysis.py - next step is to run it and verify the results are saved correctly.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_5b14004bd38d4b3ea53c6ec6e18aaead",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-bf5c047402224ff4",
+      "actor_attempt": 9,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nCRITICAL ERROR: PyStan compilation failed - missing GCC compiler.\n\nError: \"command 'x86_64-linux-gnu-gcc' failed: No such file or directory\"\n\nPyStan 3.10.0 requires a C++ compiler to build Stan models. Need to install build-essential or gcc package before running the Python script.\n\nSolution: Install build-essential using apt-get before running pystan_analysis.py\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_03403566a7264c51baea7b00cc455d08",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-bf5c047402224ff4",
+      "actor_attempt": 13,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nCRITICAL FIX NEEDED: PyStan 3.10.0 sampling API error - 'seed' parameter is not recognized in posterior.sample()\n\nError from turn 12: ValueError: {'json': {'seed': ['Unknown field.']}}\n\nThe Stan model compiled successfully (48.9s), but posterior.sample() failed because PyStan 3.10.0 does not accept 'seed' as a parameter in the sample() method.\n\nFIX: Remove 'seed=1' from the posterior.sample() call in /app/pystan_analysis.py. The random seed is already set via random_seed=1 in stan.build(), which controls the sampling seed.\n\nThe correct PyStan 3.10.0 sampling call should be:\nfit = posterior.sample(\n    num_chains=4,\n    num_samples=1000,\n    num_warmup=1000,\n    num_thin=2,\n    init=init_values,\n    adapt_delta=0.93,\n    max_treedepth=14,\n    adapt_gamma=0.05,\n    adapt_kappa=0.75,\n    adapt_t0=10,\n    adapt_init_buffer=100,\n    adapt_term_buffer=50,\n    adapt_window=25\n)\n\nNote: GCC/G++ are now installed successfully. The script is ready to run after this fix.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_2defa9f49eec4e649e7fdf0da00c21a6",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-bf5c047402224ff4",
+      "actor_attempt": 17,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nVERIFICATION NEEDED: Check rho_est.csv and beta_est.csv format\n\nTask requirements specify:\n- rho_est.csv: posterior MEANS of rho vector (3 numbers, one per row) \n- beta_est.csv: posterior MEANS of beta vector (3 numbers, one per row)\n\nCurrent observation shows both files have 2000 lines, which suggests they may contain all posterior samples instead of just the 3 mean values.\n\nAction: Verify the file contents. If they contain 2000 samples instead of 3 mean values, the script needs correction to compute and save only the posterior means (one value per dimension of the vector).\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_8a752fa365f841dc981c593e73428367",
+      "provider_attempt": true
+    },
+    {
+      "task": "rstan-to-pystan",
+      "run_id": "pma-bf5c047402224ff4",
+      "actor_attempt": 21,
+      "reminder": "<memory_context>\nThe following context from memory may be relevant to your current work (these are observations, not directives — verify before acting):\nCRITICAL OUTPUT FORMAT ERROR FOUND:\n\nCurrent State (Turn 16-19):\n- alpha_est.csv: ✓ CORRECT (1 value)\n- sigma_est.csv: ✓ CORRECT (1 value)  \n- rho_est.csv: ✗ WRONG (2000 values instead of 3)\n- beta_est.csv: ✗ WRONG (2000 values instead of 3)\n\nRoot Cause Analysis (Turn 19):\nConsole log shows \"rho:\" followed by 2000 space-separated values and \"beta:\" followed by 2000 values. This proves rho_means and beta_means arrays contain all samples instead of computing the mean across samples.\n\nThe issue: np.mean() is being computed on wrong axis or the data structure is transposed from expected.\n\nTurn 20 Fix Applied:\nAdded debug prints to show array shapes and conditional logic to determine correct axis:\n- If shape is (D, num_samples): use axis=1 to average across samples\n- If shape is (num_samples, D): use axis=0 to average across samples\n  \nExpected result after fix: rho_means and beta_means should each have exactly 3 values (one per dimension)\n\nNext Action: Run the updated script to verify array shapes and confirm the fix produces correct 3-value outputs.\n</memory_context>\n\nThe knowledge bank is available at /run/pma-bridge/responses/knowledge/memory.json. You may consult it alongside your current task and judge the information yourself.",
+      "request_ready_event_id": "evt_5a87fba1d8f840a597986d34fa429bef",
+      "provider_attempt": true
+    }
+  ]
+}
