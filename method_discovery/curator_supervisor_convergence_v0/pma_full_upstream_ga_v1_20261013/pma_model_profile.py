@@ -7,11 +7,21 @@ memory operations, trigger cadence, or task-agent settings.
 from __future__ import annotations
 
 import json
+import math
 
 
 READ_CONTEXT = "pma_predictive_read_context_v1"
 CLAUDE_MODELS = {"claude-opus-4-8", "claude-opus-5", "claude-fable-5"}
 OPENAI_MODELS = {"gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"}
+
+
+def read_context_temperature(profile: dict) -> int | float:
+    """Requested Claude manager temperature, not a claim of provider support."""
+    value = profile.get("temperature", 1)
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not 0 <= value <= 1 or not math.isfinite(value)):
+        raise ValueError("Claude PMA temperature must be a finite number from 0 to 1")
+    return value
 
 
 def load_profile(raw: bytes, candidate: str) -> tuple[str, dict]:
@@ -39,8 +49,7 @@ def load_profile(raw: bytes, candidate: str) -> tuple[str, dict]:
         if (profile.get("provider"), profile.get("api_mode"),
                 profile.get("thinking_type")) != ("anthropic", "messages", "adaptive"):
             raise ValueError("Claude PMA profile route differs")
-        if profile.get("temperature") != 1:
-            raise ValueError("Claude PMA temperature differs")
+        profile["temperature"] = read_context_temperature(profile)
     elif model in OPENAI_MODELS:
         if (profile.get("provider"), profile.get("api_mode")) != ("openai", "responses"):
             raise ValueError("GPT PMA profile must use Responses API")
