@@ -25,10 +25,14 @@ def test_only_approved_prompt_parts_change_and_horizon_is_not_repeated():
     prefix, step = REMINDER_TOOL_SYSTEM.split('2. ', 1)
     assert prefix.count(READ_BEFORE_REMINDER) == 1
     # Undo only the approved action-rule additions to recover the original prefix.
-    assert prefix.count('and the extent to which the available information supports it') == 1
+    assert prefix.count('one or two sentences') == 1
     baseline_prefix = prefix.replace(READ_BEFORE_REMINDER, '').replace(
-        'your judgment and the extent to which the available information supports it;',
-        'your judgment;')
+        '- Before each tool call, you must use one or two sentences to explain your '
+        'judgment, the available information on which it is based, and the extent to '
+        'which that information supports it. When calling memory_add, also state which '
+        'information you have selected.',
+        '- Before each tool call, briefly explain your judgment; when calling memory_add, '
+        'state which information you have selected.')
     assert hashlib.sha256(baseline_prefix.encode()).hexdigest() == (
         'd29718385b7890d0bdf83736a94da6378cd005d7fa23b4599c0d2779c196c048')
     assert '2. ' + step == EXPECTED_STEP
@@ -37,9 +41,9 @@ def test_only_approved_prompt_parts_change_and_horizon_is_not_repeated():
 
 def test_actual_mock_requests_and_original_soft_reminder():
     assert PUBLIC_FORECAST_REMINDER == (
-        'Briefly state which information you have selected that you predict will '
-        'still be worth presenting to the task agent to support subsequent task '
-        'work after the task has progressed for another eight turns.')
+        'Please use one or two sentences to explain which information you have selected '
+        'and why you judge that it will still be worth presenting to the task agent to '
+        'support subsequent work after the task has progressed for another eight turns.')
     agent = ReminderToolMemoryAgent(llm=Script(add(content=''), done()))
     result = run(agent)
     assert agent.llm.calls[0]['system'] == REMINDER_TOOL_SYSTEM
