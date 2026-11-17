@@ -18,8 +18,9 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
 ).replace(
     '- Before expressing the reminder decision, briefly explain your judgment.\n'
     '- Before calling memory_add, briefly state which information you have selected.',
-    '- Before each tool call, briefly explain your judgment; when calling memory_add, '
-    'state which information you have selected.'
+    '- Before each tool call, briefly explain your judgment and the extent to which '
+    'the available information supports it; when calling memory_add, state which '
+    'information you have selected.'
 ).replace(
     'Manage task information through the following steps:',
     'Please manage task information in the following order:'
@@ -40,8 +41,7 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     'which information received this time will still be worth presenting to the task agent to'
     ' support subsequent task work after the task has progressed for another eight turns. For'
     ' the selected information, faithfully organize its content and current state and save it'
-    ' in the knowledge bank. Organize information only to the extent supported by the '
-    'available information.'
+    ' in the knowledge bank.'
 )
 
 REMINDER_TOOL = {
