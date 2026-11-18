@@ -19,6 +19,29 @@ from .control_processes import (scan as scan_control_processes,
                                 probe_registered, stop_registered)
 
 
+# Host-only Harbor artifact downloads. These paths are not added to task.toml,
+# mounted into the task, or sent to either model. SingleStepTrial downloads
+# configured artifacts after AGENT_END and before VERIFICATION_START.
+FINAL_ARTIFACT_SOURCES = {
+    'rstan-to-pystan': ('/app/pystan_analysis.py', '/app/alpha_est.csv',
+                        '/app/sigma_est.csv', '/app/rho_est.csv', '/app/beta_est.csv'),
+    'merge-diff-arc-agi-task': ('/app/repo/algo.py',),
+}
+
+
+def final_artifact_sources(spec: dict) -> tuple[str, ...]:
+    if (spec.get('research_candidate') != 'pma_predictive_read_context_v1' or
+            spec.get('condition') != 'B' or
+            spec.get('evaluation_protocol') != 'official_shared_v2'):
+        return ()
+    return FINAL_ARTIFACT_SOURCES.get(spec.get('task_id'), ())
+
+
+def _file_identity(path: Path) -> dict:
+    return {'bytes': path.stat().st_size,
+            'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
 def _source_identity(value: str) -> str:
     return value.replace('\\', '/').lower().replace('/run/desktop/mnt/host/', '').replace(':', '')
 
@@ -671,10 +694,87 @@ class NativeSharedTrialHooks(PMATrialHooks):
                 hashlib.sha256((source / 'test.sh').read_bytes()).hexdigest() !=
                 self.spec['native_test_sh_sha256']):
             raise RuntimeError('native shared evaluator source changed')
+        if final_artifact_sources(self.spec):
+            self.record_pre_verification_artifacts()
         _atomic(self.archive / 'verification_released.json', {
             'run_id': self.spec['run_id'], 'container_id': self.container_id,
             'source_tree_sha256': self.spec['native_tests_tree_sha256'],
             'native_shared': True, 'upload_still_pending': True})
+
+    def record_pre_verification_artifacts(self) -> None:
+        """Bind Harbor's post-agent, pre-verifier copies to this run."""
+        writers = json.loads((self.archive / 'writer_termination_check.json').read_text(
+            encoding='utf-8'))
+        if writers.get('task_owned_pids_preserved') != []:
+            raise RuntimeError('Task-owned processes remain; final artifact bytes may change')
+        manifest_path = self.trial.paths.artifacts_dir / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if not isinstance(manifest, list):
+            raise RuntimeError('Harbor artifact manifest has invalid shape')
+        trial_dir = self.trial.paths.trial_dir.resolve()
+        rows = []
+        for source in final_artifact_sources(self.spec):
+            matches = [row for row in manifest if row.get('source') == source]
+            if len(matches) != 1:
+                raise RuntimeError(f'Harbor artifact source ambiguous or absent: {source}')
+            row = matches[0]
+            destination = (trial_dir / row['destination']).resolve()
+            if not destination.is_relative_to(trial_dir):
+                raise RuntimeError('Harbor artifact destination escaped trial directory')
+            if row.get('status') == 'ok':
+                if row.get('type') != 'file' or not destination.is_file():
+                    raise RuntimeError(f'Harbor artifact copy missing: {source}')
+                identity = _file_identity(destination)
+            else:
+                if destination.exists():
+                    raise RuntimeError(f'Unexpected failed artifact copy exists: {source}')
+                identity = None
+            rows.append({'source': source, 'destination': str(destination),
+                         'harbor_status': row.get('status'), 'identity': identity})
+        _atomic(self.archive / 'final_artifacts_before_verifier.json', {
+            'run_id': self.spec['run_id'], 'task_id': self.spec['task_id'],
+            'stage': 'after_agent_end_before_verifier',
+            'captured_at_epoch': time.time(),
+            'artifact_manifest': str(manifest_path),
+            'artifact_manifest_identity': _file_identity(manifest_path),
+            'files': rows})
+
+    async def check_post_verification_artifacts(self) -> None:
+        """Re-read from the still-running main container after native tests."""
+        before = json.loads((self.archive / 'final_artifacts_before_verifier.json').read_text(
+            encoding='utf-8'))
+        if before.get('run_id') != self.spec['run_id']:
+            raise RuntimeError('Pre-verifier artifact record belongs to another run')
+        rows, conflicts = [], []
+        for row in before['files']:
+            source = row['source']
+            destination = self.archive / 'final_artifacts_after_verifier' / source.lstrip('/')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                await self.trial.agent_environment.service_download_file(
+                    source_path=source, target_path=destination, service=None)
+            except Exception as exc:
+                identity = None
+                error = type(exc).__name__
+            else:
+                if not destination.is_file():
+                    identity = None
+                    error = 'download_returned_without_file'
+                else:
+                    identity = _file_identity(destination)
+                    error = None
+            if identity != row['identity']:
+                conflicts.append(source)
+            rows.append({'source': source, 'destination': str(destination) if identity else None,
+                         'identity': identity, 'download_error_type': error,
+                         'matches_pre_verifier': identity == row['identity']})
+        _atomic(self.archive / 'final_artifacts_after_verifier.json', {
+            'run_id': self.spec['run_id'], 'task_id': self.spec['task_id'],
+            'stage': 'after_native_verifier_before_environment_stop',
+            'checked_at_epoch': time.time(),
+            'matches': not conflicts, 'conflicts': conflicts, 'files': rows})
+        if conflicts:
+            raise RuntimeError(f'Native verifier artifact identity changed or unreadable: {conflicts}')
 
 
 def install_trial_hooks() -> None:
@@ -689,6 +789,13 @@ def install_trial_hooks() -> None:
     original = Trial.create.__func__
 
     async def create(cls, config):
+        artifact_sources = final_artifact_sources(spec)
+        if artifact_sources:
+            if config.artifacts:
+                raise RuntimeError('Unexpected preconfigured trial artifact sources')
+            # Harbor's own read-only download happens after the agent has
+            # stopped and before the verifier starts. Task assets stay intact.
+            config.artifacts = list(artifact_sources)
         trial = await original(cls, config)
         if spec.get('runtime_policy') is not None:
             from experiment_runner.runtime_policy import apply_harbor_policy
@@ -703,6 +810,17 @@ def install_trial_hooks() -> None:
         trial.add_hook(TrialEvent.AGENT_START, hooks.agent_start)
         trial.add_hook(TrialEvent.AGENT_END, hooks.agent_end)
         trial.add_hook(TrialEvent.VERIFICATION_START, hooks.verification_start)
+        if artifact_sources:
+            if not isinstance(hooks, NativeSharedTrialHooks):
+                raise RuntimeError('Final artifact capture requires shared native verifier')
+            original_run_verifier = trial._run_verifier
+
+            async def run_verifier_with_artifact_check():
+                result = await original_run_verifier()
+                await hooks.check_post_verification_artifacts()
+                return result
+
+            trial._run_verifier = run_verifier_with_artifact_check
         return trial
 
     Trial.create = classmethod(create)
