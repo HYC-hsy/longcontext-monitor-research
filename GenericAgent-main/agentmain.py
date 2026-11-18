@@ -573,6 +573,19 @@ class GenericAgent:
 
 GeneraticAgent = GenericAgent
 
+def _next_task_display_item(display_queue, task_thread):
+    """Wait for a task result without imposing a hidden total limit on uncapped runs."""
+    if (os.environ.get('GA_EXPERIMENT_RUNTIME_POLICY') != 'v1'
+            or os.environ.get('GA_EXPERIMENT_TASK_TURNS') != 'uncapped'):
+        return display_queue.get(timeout=2200)
+    while True:
+        try:
+            return display_queue.get(timeout=5)
+        except queue.Empty:
+            if not task_thread.is_alive():
+                raise RuntimeError('GA task thread exited before task completion')
+
+
 if __name__ == '__main__':
     import argparse
     from datetime import datetime
@@ -607,7 +620,8 @@ if __name__ == '__main__':
     if args.nolog: agent.log_path = False
     agent.next_llm(args.llm_no)
     agent.verbose = args.verbose
-    threading.Thread(target=agent.run, daemon=True).start()
+    task_thread = threading.Thread(target=agent.run, daemon=True)
+    task_thread.start()
 
     histfile = args.history
     if args.task:
@@ -629,7 +643,7 @@ if __name__ == '__main__':
         with open(infile, encoding='utf-8') as f: raw = f.read()
         while True:
             dq = agent.put_task(raw, source='func' if args.func else 'task')
-            while 'done' not in (item := dq.get(timeout=2200)): 
+            while 'done' not in (item := _next_task_display_item(dq, task_thread)):
                 if 'next' in item: 
                     with open(outfile, 'w', encoding='utf-8') as f: f.write(item.get('next', ''))
             if args.task and os.environ.get('GA_BENCH_RUN_ID') and os.path.isdir('/logs/agent'):
