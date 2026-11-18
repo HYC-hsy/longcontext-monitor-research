@@ -19,6 +19,15 @@ EXPECTED_STEP = (
     ' the selected information, faithfully organize its content and current state and save it'
     ' in the knowledge bank.\n'
 )
+SAVE_WITH_BASIS_AND_STATE = (
+    '- When saving, write the selected information together with its basis and current '
+    'state into the knowledge entry, fully retaining the content needed to understand '
+    'and use it later.'
+)
+ORIGINAL_SAVE_RULE = (
+    '- When saving, fully retain the content needed to understand and use the selected '
+    'information later.'
+)
 READ_BEFORE_REMINDER = '- Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.\n'
 
 def test_only_approved_prompt_parts_change_and_horizon_is_not_repeated():
@@ -26,7 +35,9 @@ def test_only_approved_prompt_parts_change_and_horizon_is_not_repeated():
     assert prefix.count(READ_BEFORE_REMINDER) == 1
     # Undo only the approved action-rule additions to recover the original prefix.
     assert prefix.count('one or two sentences') == 1
-    baseline_prefix = prefix.replace(READ_BEFORE_REMINDER, '').replace(
+    assert prefix.count(SAVE_WITH_BASIS_AND_STATE) == 1
+    baseline_prefix = prefix.replace(SAVE_WITH_BASIS_AND_STATE, ORIGINAL_SAVE_RULE).replace(
+        READ_BEFORE_REMINDER, '').replace(
         '- Before each tool call, you must use one or two sentences to explain your '
         'judgment, the available information on which it is based, and the extent to '
         'which that information supports it. When calling memory_add, also state which '

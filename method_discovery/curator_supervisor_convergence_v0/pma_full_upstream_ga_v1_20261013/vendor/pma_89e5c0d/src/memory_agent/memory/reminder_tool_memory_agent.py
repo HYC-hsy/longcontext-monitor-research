@@ -27,8 +27,9 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     'Please manage task information in the following order:'
 ).replace(
     '- When saving, fully retain the content needed to understand and use the selected information later.',
-    '- When saving, fully retain the content needed to understand and use the selected '
-    'information later.\n- Before each call to send_reminder, first call memory_read to '
+    '- When saving, write the selected information together with its basis and current '
+    'state into the knowledge entry, fully retaining the content needed to understand '
+    'and use it later.\n- Before each call to send_reminder, first call memory_read to '
     'retrieve information from the knowledge bank.'
 ).replace(
     "2. Predict and save. Based on the task description, the task agent's trajectory, and the"
