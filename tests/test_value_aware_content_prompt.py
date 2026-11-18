@@ -14,15 +14,15 @@ EXPECTED_STEP = (
     "2. Predict and save. Pieces of information affect one another's value. After completing "
     "the reminder decision, based on the task description, the task agent's execution "
     'trajectory, and the judgment and reminder decision you have just made, you must predict '
-    'which information received this time will still be worth presenting to the task agent to'
-    ' support subsequent task work after the task has progressed for another eight turns. For'
-    ' the selected information, faithfully organize its content and current state and save it'
-    ' in the knowledge bank.\n'
+    'which fragments of the original information received this time will still be worth '
+    'presenting to the task agent to support subsequent task work after the task has '
+    'progressed for another eight turns. Organize and summarize the selected fragments '
+    'together with the context needed to understand them, and save them in the knowledge bank.\n'
 )
-SAVE_WITH_BASIS_AND_STATE = (
-    '- When saving, write the selected information together with its basis and current '
-    'state into the knowledge entry, fully retaining the content needed to understand '
-    'and use it later.'
+SAVE_FROM_ORIGINAL_FRAGMENTS = (
+    '- When saving, use the selected original information fragments as material to '
+    'organize and summarize, preserving their original meaning and current state, '
+    'as well as the context needed to understand and use them later.'
 )
 ORIGINAL_SAVE_RULE = (
     '- When saving, fully retain the content needed to understand and use the selected '
@@ -35,8 +35,8 @@ def test_only_approved_prompt_parts_change_and_horizon_is_not_repeated():
     assert prefix.count(READ_BEFORE_REMINDER) == 1
     # Undo only the approved action-rule additions to recover the original prefix.
     assert prefix.count('one or two sentences') == 1
-    assert prefix.count(SAVE_WITH_BASIS_AND_STATE) == 1
-    baseline_prefix = prefix.replace(SAVE_WITH_BASIS_AND_STATE, ORIGINAL_SAVE_RULE).replace(
+    assert prefix.count(SAVE_FROM_ORIGINAL_FRAGMENTS) == 1
+    baseline_prefix = prefix.replace(SAVE_FROM_ORIGINAL_FRAGMENTS, ORIGINAL_SAVE_RULE).replace(
         READ_BEFORE_REMINDER, '').replace(
         '- Before each tool call, you must use one or two sentences to explain your '
         'judgment, the available information on which it is based, and the extent to '
@@ -78,10 +78,11 @@ def test_each_reminder_can_read_first_and_receive_current_bank():
     assert receipts(agent.llm.calls[3])[-1]['success']
 
 
-def test_selected_information_is_faithful_not_an_extra_organization_forecast():
-    assert 'For the selected information, faithfully organize its content and current state' in REMINDER_TOOL_SYSTEM
+def test_selected_fragments_preserve_meaning_state_and_context():
+    assert SAVE_FROM_ORIGINAL_FRAGMENTS in REMINDER_TOOL_SYSTEM
     assert 'predict how to organize' not in REMINDER_TOOL_SYSTEM
     assert 'Based on these predictions' not in REMINDER_TOOL_SYSTEM
     assert REMINDER_TOOL_SYSTEM.rstrip().endswith(
-        'For the selected information, faithfully organize its content and current state and save it in the knowledge bank.')
+        'Organize and summarize the selected fragments together with the context needed '
+        'to understand them, and save them in the knowledge bank.')
     assert 'Organize information only to the extent supported' not in REMINDER_TOOL_SYSTEM

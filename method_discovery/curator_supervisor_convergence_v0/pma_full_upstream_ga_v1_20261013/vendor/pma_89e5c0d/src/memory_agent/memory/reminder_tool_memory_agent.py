@@ -27,9 +27,10 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     'Please manage task information in the following order:'
 ).replace(
     '- When saving, fully retain the content needed to understand and use the selected information later.',
-    '- When saving, write the selected information together with its basis and current '
-    'state into the knowledge entry, fully retaining the content needed to understand '
-    'and use it later.\n- Before each call to send_reminder, first call memory_read to '
+    '- When saving, use the selected original information fragments as material to '
+    'organize and summarize, preserving their original meaning and current state, '
+    'as well as the context needed to understand and use them later.\n'
+    '- Before each call to send_reminder, first call memory_read to '
     'retrieve information from the knowledge bank.'
 ).replace(
     "2. Predict and save. Based on the task description, the task agent's trajectory, and the"
@@ -40,10 +41,10 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     "2. Predict and save. Pieces of information affect one another's value. After completing "
     "the reminder decision, based on the task description, the task agent's execution "
     'trajectory, and the judgment and reminder decision you have just made, you must predict '
-    'which information received this time will still be worth presenting to the task agent to'
-    ' support subsequent task work after the task has progressed for another eight turns. For'
-    ' the selected information, faithfully organize its content and current state and save it'
-    ' in the knowledge bank.'
+    'which fragments of the original information received this time will still be worth '
+    'presenting to the task agent to support subsequent task work after the task has '
+    'progressed for another eight turns. Organize and summarize the selected fragments '
+    'together with the context needed to understand them, and save them in the knowledge bank.'
 )
 
 REMINDER_TOOL = {
