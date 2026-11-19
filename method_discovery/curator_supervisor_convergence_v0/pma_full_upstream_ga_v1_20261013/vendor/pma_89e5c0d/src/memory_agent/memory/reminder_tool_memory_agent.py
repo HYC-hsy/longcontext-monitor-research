@@ -44,7 +44,10 @@ REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
     'which fragments of the original information received this time will still be worth '
     'presenting to the task agent to support subsequent task work after the task has '
     'progressed for another eight turns. Organize and summarize the selected fragments '
-    'together with the context needed to understand them, and save them in the knowledge bank.'
+    'together with the context needed to understand them, and save them in the knowledge bank as memories whose origins are clear and that can be revised in light of new information.'
+).replace(
+    "1. Judge and decide the reminder. You must use memory_read to carefully review the existing knowledge bank. After receiving its result, consider the task agent's execution trajectory. You must judge which information in the knowledge bank, as the task progresses, has become valuable or remains valuable for the task agent's current or upcoming work, and accordingly decide whether to remind the task agent and what to remind it of. If a reminder is needed, call send_reminder with its content. Otherwise, do not call it.",
+    "1. Judge and decide the reminder. As the task agent's external memory, you must use memory_read to review the existing knowledge bank and consider the task agent's execution trajectory to judge which stored information is valuable for its current or upcoming work, and accordingly decide whether to remind it and what to remind it of. If a reminder is needed, use send_reminder to bring all of the selected information and the necessary context back into the task agent's view, so it can continue making judgments and carrying the task forward. Otherwise, do not call it."
 )
 
 REMINDER_TOOL = {
