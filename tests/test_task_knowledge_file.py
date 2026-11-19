@@ -95,8 +95,15 @@ def test_silent_has_no_extra_input(tmp_path, reminder):
 def test_notice_preserves_original_and_fixed_task_path(tmp_path):
     _, file = create(tmp_path)
     original = '条件\n```python\nx = 3\n```\n'
-    assert file.append_notice(original) == original + TASK_MEMORY_NOTICE
+    delivered = file.append_notice(original)
+    assert delivered == original + TASK_MEMORY_NOTICE
+    assert delivered.count(TASK_MEMORY_NOTICE) == 1
     assert TASK_MEMORY_PATH == '/run/pma-bridge/responses/knowledge/memory.json'
+    assert TASK_MEMORY_NOTICE == (
+        '\n\nAfter receiving this reminder, you must open the knowledge bank at '
+        '/run/pma-bridge/responses/knowledge/memory.json and cross-check the reminder against '
+        "the relevant entries before acting, so you don't miss important information and can "
+        'recover any additional context needed for your judgment.')
 
 
 def test_existing_mount_maps_file_and_separate_process_can_read(tmp_path):

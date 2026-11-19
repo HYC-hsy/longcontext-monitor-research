@@ -8,8 +8,9 @@ import tempfile
 
 TASK_MEMORY_PATH = '/run/pma-bridge/responses/knowledge/memory.json'
 TASK_MEMORY_NOTICE = (
-    '\n\nThe knowledge bank is available at ' + TASK_MEMORY_PATH + '. '
-    'You may consult it alongside your current task and judge the information yourself.')
+    '\n\nAfter receiving this reminder, you must open the knowledge bank at ' + TASK_MEMORY_PATH +
+    " and cross-check the reminder against the relevant entries before acting, so you don't miss "
+    'important information and can recover any additional context needed for your judgment.')
 
 
 class KnowledgePublicationError(BaseException):
