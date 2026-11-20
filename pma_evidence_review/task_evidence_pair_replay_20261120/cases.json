@@ -1,0 +1,105 @@
+{
+  "archive_sha256": "a83e56146016f3facea4f5e892f1899c829a601d553381c773f01d87361d8c17",
+  "cases": [
+    {
+      "id": "c4-r12",
+      "run": "04_pma-44e3124f44014595",
+      "request": 12,
+      "event": "evt_59596dcc874c4053b396aafca5d5caf3",
+      "evidence": [
+        {
+          "label": "Original task",
+          "field": ["messages", 0, "content", 0, "text"],
+          "literal": "Maximum 30 files or folders in each directory"
+        },
+        {
+          "label": "Latest command",
+          "field": ["messages", 21, "content", 2, "input", "script"],
+          "literal": "ls -d test_output/shard_* | wc -l && ls test_output/shard_0000/ | wc -l && ls test_output/shard_0329/ | wc -l"
+        },
+        {
+          "label": "Command stdout",
+          "field": ["messages", 22, "content", 0, "content"],
+          "json_key": "stdout",
+          "literal": "330\n30\n28"
+        }
+      ]
+    },
+    {
+      "id": "eigen-r25",
+      "run": "05_pma-2db35916657749d4",
+      "request": 25,
+      "event": "evt_9e84558e06854f138f1e9012b401010f",
+      "evidence": [
+        {
+          "label": "Diagnostic script",
+          "field": ["messages", 25, "content", 2, "input", "content"],
+          "literal": "from eigen import find_dominant_eigenvalue_and_eigenvector, _power_iter_count, _fallback_count"
+        },
+        {
+          "label": "Counter updates in eigen.py",
+          "field": ["messages", 29, "content", 2, "input", "new_content"],
+          "literal": "_power_iter_count += 1"
+        },
+        {
+          "label": "Counter updates in eigen.py",
+          "field": ["messages", 29, "content", 2, "input", "new_content"],
+          "literal": "_fallback_count += 1"
+        },
+        {
+          "label": "Latest diagnostic stdout",
+          "field": ["messages", 32, "content", 0, "content"],
+          "json_key": "stdout",
+          "literal": "Power iteration used: 0\nFallback to np.linalg.eig: 0"
+        }
+      ]
+    },
+    {
+      "id": "rstan-r13",
+      "run": "01_pma-449bca79f0474242",
+      "request": 13,
+      "event": "evt_288fd644953a4751bbf27b96f497eece",
+      "evidence": [
+        {
+          "label": "rho_est.csv read",
+          "field": ["messages", 22, "content", 3, "content"],
+          "literal": "[FILE] 2000 lines | PARTIAL showing 200; assess need for more"
+        },
+        {
+          "label": "beta_est.csv read",
+          "field": ["messages", 22, "content", 4, "content"],
+          "literal": "[FILE] 2000 lines | PARTIAL showing 200; assess need for more"
+        },
+        {
+          "label": "Earlier write to the analysis script",
+          "field": ["messages", 7, "content", 2, "input", "content"],
+          "literal": "np.savetxt('/app/rho_est.csv', rho_means, fmt='%.18e')"
+        },
+        {
+          "label": "Earlier write to the analysis script",
+          "field": ["messages", 7, "content", 2, "input", "content"],
+          "literal": "np.savetxt('/app/beta_est.csv', beta_means, fmt='%.18e')"
+        }
+      ]
+    },
+    {
+      "id": "c4-r10",
+      "run": "04_pma-44e3124f44014595",
+      "request": 10,
+      "event": "evt_7748c43a85d8405b862dddc4db0df8d7",
+      "evidence": [
+        {
+          "label": "Earlier reminder",
+          "field": ["messages", 16, "content", 1, "text"],
+          "literal": "IMPORTANT: compress.py has NOT been created yet. Only decompress.py exists in /app."
+        },
+        {
+          "label": "More recent directory listing stdout",
+          "field": ["messages", 18, "content", 1, "content"],
+          "json_key": "stdout",
+          "literal": "-rw-r--r-- 1 root root 5.8K Nov 19 22:50 compress.py\n-rw-r--r-- 1 root root 4.2K Nov 19 22:51 decompress.py"
+        }
+      ]
+    }
+  ]
+}
