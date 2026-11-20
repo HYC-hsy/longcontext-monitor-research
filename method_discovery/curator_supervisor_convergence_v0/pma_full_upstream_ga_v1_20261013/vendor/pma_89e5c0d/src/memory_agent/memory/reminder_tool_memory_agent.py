@@ -5,50 +5,30 @@ from .read_context_predictive_memory_agent import (
     ReadContextPredictiveMemoryAgent, UnifiedMemoryAgentResult, MemoryOperation,
     PMAPhaseError, PMAToolRecoveryExhausted, PMADecisionRecoveryExhausted,
     MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS, MAX_CONSECUTIVE_DECISION_ERROR_ROUNDS,
-    PUBLIC_FORECAST_REMINDER, has_public_text, REMIND_FIRST_SYSTEM,
+    PUBLIC_FORECAST_REMINDER, has_public_text,
 )
 
-REMINDER_TOOL_SYSTEM = REMIND_FIRST_SYSTEM.replace(
-    '- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.',
-    '- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.\n'
-    '- send_reminder: Record information to remind the task agent of. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder.'
-).replace(
-    'Express the reminder decision with one of:\n<context_for_action>\nInformation to remind the task agent of.\n</context_for_action>\n<no_intervention/>',
-    'If a reminder is needed, call send_reminder with its content. Otherwise, do not call it.'
-).replace(
-    '- Before expressing the reminder decision, briefly explain your judgment.\n'
-    '- Before calling memory_add, briefly state which information you have selected.',
-    '- Before each tool call, you must use one or two sentences to explain your '
-    'judgment, the available information on which it is based, and the extent to '
-    'which that information supports it. When calling memory_add, also state which '
-    'information you have selected.'
-).replace(
-    'Manage task information through the following steps:',
-    'Please manage task information in the following order:'
-).replace(
-    '- When saving, fully retain the content needed to understand and use the selected information later.',
-    '- When saving, use the selected original information fragments as material to '
-    'organize and summarize, preserving their original meaning and current state, '
-    'as well as the context needed to understand and use them later.\n'
-    '- Before each call to send_reminder, first call memory_read to '
-    'retrieve information from the knowledge bank.'
-).replace(
-    "2. Predict and save. Based on the task description, the task agent's trajectory, and the"
-    ' judgment you have just made, you must predict which information received this time will'
-    ' still be worth presenting to the task agent to support subsequent task work after the '
-    'task has progressed for another eight turns, and organize and save that information in '
-    'the knowledge bank.',
-    "2. Predict and save. Pieces of information affect one another's value. After completing "
-    "the reminder decision, based on the task description, the task agent's execution "
-    'trajectory, and the judgment and reminder decision you have just made, you must predict '
-    'which fragments of the original information received this time will still be worth '
-    'presenting to the task agent to support subsequent task work after the task has '
-    'progressed for another eight turns. Organize and summarize the selected fragments '
-    'together with the context needed to understand them, and save them in the knowledge bank as memories whose origins are clear and that can be revised in light of new information.'
-).replace(
-    "1. Judge and decide the reminder. You must use memory_read to carefully review the existing knowledge bank. After receiving its result, consider the task agent's execution trajectory. You must judge which information in the knowledge bank, as the task progresses, has become valuable or remains valuable for the task agent's current or upcoming work, and accordingly decide whether to remind the task agent and what to remind it of. If a reminder is needed, call send_reminder with its content. Otherwise, do not call it.",
-    "1. Judge and decide the reminder. Use memory_read to review information previously saved in the knowledge bank. Consider the newly observed execution trajectory and use send_reminder to remind the task agent when its work shows a disconnect between earlier and later steps."
-)
+REMINDER_TOOL_SYSTEM = """You are the task agent's information manager, helping it use existing information in long tasks. Your role is to draw on previously saved information to remind it when its work shows a disconnect between earlier and later steps, and to predict which information will be valuable for later work, then organize and save it.
+
+The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
+
+## Tools
+
+- memory_add: Save information in the knowledge bank.
+- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
+- send_reminder: Record information to remind the task agent of. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder.
+
+## Action Principles
+
+- Before calling memory_add or send_reminder, briefly explain which information you selected and why.
+- Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.
+
+Please manage task information in the following order:
+
+1. Judge and decide the reminder. Use memory_read to review information previously saved in the knowledge bank. Consider the newly observed execution trajectory and use send_reminder to remind the task agent when its work shows a disconnect between earlier and later steps.
+
+2. Predict and save. After deciding whether to remind the task agent, you must predict which information from the original task description and the newly observed execution trajectory will still be worth presenting to the task agent to support subsequent work after the task has progressed for another eight turns. Use memory_add to organize, restate, and save the selected information and necessary context in the knowledge bank, so that the task agent can accurately understand what the original materials conveyed at the time even when it can no longer see them.
+"""
 
 REMINDER_TOOL = {
     'type': 'function', 'function': {
