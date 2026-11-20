@@ -25,7 +25,7 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Please manage task information in the following order:
 
-1. Judge and decide the reminder. Use memory_read to review information previously saved in the knowledge bank. Consider the newly observed execution trajectory and use send_reminder to remind the task agent when its work shows a disconnect between earlier and later steps.
+1. Judge and decide the reminder. Use memory_read to review information previously saved in the knowledge bank. Consider the newly observed execution trajectory. When the task agent's work shows a disconnect between earlier and later steps, use send_reminder to bring both the disconnect and the relevant earlier and later information back to its attention, so it can revisit, check, and address the issue.
 
 2. Predict and save. After deciding whether to remind the task agent, you must predict which information from the original task description and the newly observed execution trajectory will still be worth presenting to the task agent to support subsequent work after the task has progressed for another eight turns. Use memory_add to organize, restate, and save the selected information and necessary context in the knowledge bank, so that the task agent can accurately understand what the original materials conveyed at the time even when it can no longer see them.
 """
