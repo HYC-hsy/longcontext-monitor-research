@@ -7,10 +7,6 @@ from pathlib import Path
 import tempfile
 
 TASK_MEMORY_PATH = '/run/pma-bridge/responses/knowledge/memory.json'
-TASK_MEMORY_NOTICE = (
-    '\n\nAfter receiving this reminder, you must open the knowledge bank at ' + TASK_MEMORY_PATH +
-    " and cross-check the reminder against the relevant entries before acting, so you don't miss "
-    'important information and can recover any additional context needed for your judgment.')
 
 
 class KnowledgePublicationError(BaseException):
@@ -73,9 +69,3 @@ class TaskKnowledgeFile:
         finally:
             if pending is not None and os.path.exists(pending):
                 os.unlink(pending)
-
-    def append_notice(self, reminder):
-        self.publish()
-        if isinstance(reminder, str) and reminder.strip():
-            return reminder + TASK_MEMORY_NOTICE
-        return reminder

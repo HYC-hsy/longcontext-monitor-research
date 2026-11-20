@@ -402,7 +402,7 @@ class PMAEpisode:
                 candidate_agent.last_delivery_status = "invalid_reference_no_delivery"
         reminder = self.agent._get_memory_system_prompt()
         if self.task_knowledge_file is not None:
-            reminder = self.task_knowledge_file.append_notice(reminder)
+            self.task_knowledge_file.publish()
         return {"status": "reminder" if reminder else "silent", "reminder": reminder,
                 "actor_attempt": attempt, "delivery": "returned_not_confirmed_in_ga_request"}
 
