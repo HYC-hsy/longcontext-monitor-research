@@ -52,7 +52,7 @@ class SidecarTests(unittest.TestCase):
 
     def status(self):
         return [json.loads(line) for line in
-                (self.private / 'archive' / 'provider_capture_status.jsonl').read_text(
+                (self.private / 'provider_capture_status.jsonl').read_text(
                     encoding='utf-8').splitlines()]
 
     def test_default_off_and_field_presence(self):

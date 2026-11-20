@@ -111,7 +111,8 @@ class ResponseSidecar:
                          requests: Path, responses: Path):
         if environ.get(ENABLE_ENV) != "1":
             return None
-        status = private / "archive" / "provider_capture_status.jsonl"
+        # Keep capture metadata outside the ordinary archive projection too.
+        status = private / "provider_capture_status.jsonl"
         try:
             text = environ.get(ROOT_ENV, "")
             root = Path(text)
