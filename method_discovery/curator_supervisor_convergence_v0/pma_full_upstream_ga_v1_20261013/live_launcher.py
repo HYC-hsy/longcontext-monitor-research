@@ -849,6 +849,9 @@ def run_live(args) -> dict:
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
         env = clean_candidate_environment(os.environ)
+        # Provider response originals belong only to the host-side PMA worker.
+        env.pop('PMA_PROVIDER_RESPONSE_CAPTURE', None)
+        env.pop('PMA_PROVIDER_RESPONSE_CAPTURE_ROOT', None)
         # This field is frozen in the manifest, never inherited from a shell.
         env.pop('GA_EXPERIMENT_TASK_TURNS', None)
         if runtime_policy is not None:

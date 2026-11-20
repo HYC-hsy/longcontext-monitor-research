@@ -20,6 +20,7 @@ from episode import PMAEpisode, construct_upstream
 from event_spool import EventDispatcher
 from memory_agent.memory_enabled_agent import MemoryEnabledTerminus2
 from harbor.agents.terminus_2.terminus_2 import Terminus2
+from provider_response_sidecar import ResponseSidecar
 
 
 class PMAAuditIntegrityError(BaseException):
@@ -37,7 +38,8 @@ def append_private_audit(path: Path, row: dict) -> None:
         raise PMAAuditIntegrityError("private PMA audit write failed") from exc
 
 
-def install_http_wire_audit(archive: Path, current_call: dict) -> None:
+def install_http_wire_audit(archive: Path, current_call: dict,
+                            sidecar: ResponseSidecar | None = None) -> None:
     """Record only safe final HTTP fields; forward the request unchanged."""
     original_send = httpx.AsyncClient.send
     request_index = 0
@@ -51,6 +53,7 @@ def install_http_wire_audit(archive: Path, current_call: dict) -> None:
         row = {
             "request_index": request_index,
             "call_sequence": call_sequence,
+            "wake": current_call.get("wake"),
             "attempt_in_call": attempts_by_call[call_sequence],
             "started_epoch": time.time(),
             "route_kind": "anthropic_messages" if request.url.path.endswith("/messages")
@@ -67,7 +70,11 @@ def install_http_wire_audit(archive: Path, current_call: dict) -> None:
                 "temperature_present": "temperature" in body,
                 "temperature": body.get("temperature") if "temperature" in body else None,
                 "thinking": body.get("thinking"),
+                "thinking_present": "thinking" in body,
                 "output_config": body.get("output_config"),
+                "output_config_present": "output_config" in body,
+                "reasoning_effort": body.get("reasoning_effort"),
+                "reasoning_effort_present": "reasoning_effort" in body,
                 "max_tokens": body.get("max_tokens"),
                 "tool_choice_present": "tool_choice" in body,
                 "tool_choice": body.get("tool_choice"),
@@ -87,6 +94,15 @@ def install_http_wire_audit(archive: Path, current_call: dict) -> None:
             append_private_audit(archive / "memory_http_wire.jsonl", row)
             raise
         row.update({"http_status": response.status_code, "ended_epoch": time.time()})
+        if sidecar is not None and row["route_kind"] == "anthropic_messages":
+            try:
+                sidecar.capture(response, {"run_id": current_call.get("run_id"), **row},
+                                stream=bool(kwargs.get("stream", False)))
+            except Exception as exc:
+                sidecar._status({"run_id": current_call.get("run_id"),
+                                 "request_index": request_index,
+                                 "capture_status": "failed",
+                                 "error_type": type(exc).__name__})
         append_private_audit(archive / "memory_http_wire.jsonl", row)
         return response
 
@@ -97,7 +113,7 @@ def install_transport_audit(agent, archive: Path) -> None:
     """Observe actual model calls and tool receipts without adding requests."""
     original = agent._memory_llm.call
     calls = 0
-    current_call = {"value": None}
+    current_call = {"value": None, "wake": None}
     def retry_observer(row):
         append_private_audit(archive / "memory_retry_attempts.jsonl",
                              {"call_sequence": calls, **row})
@@ -108,6 +124,7 @@ def install_transport_audit(agent, archive: Path) -> None:
         calls += 1
         current_call["value"] = calls
         candidate_agent = agent._memory_agent
+        current_call["wake"] = getattr(candidate_agent, '_step', None)
         phase = (candidate_agent.transport_phase if getattr(agent, '_research_candidate', None)
                  in ('pma_gap_memory_v0', 'pma_gap_evidence_v1', 'pma_predictive_read_context_v1')
                  else "bank_management" if tools else "context_decision")
@@ -395,7 +412,11 @@ async def serve(args: argparse.Namespace) -> None:
             agent._memory, responses, run_id=args.run_id, task_id=args.task_id)
     current_call = install_transport_audit(agent, episode.archive)
     if args.research_candidate == 'pma_predictive_read_context_v1' and not args.fake_memory:
-        install_http_wire_audit(episode.archive, current_call)
+        current_call["run_id"] = args.run_id
+        sidecar = ResponseSidecar.from_environment(
+            os.environ, run_id=args.run_id, private=private,
+            requests=requests, responses=responses)
+        install_http_wire_audit(episode.archive, current_call, sidecar)
     dispatcher = EventDispatcher(episode, requests, responses,
                                  deadline_epoch=args.deadline_epoch)
     (private / "worker_ready.json").write_text(json.dumps({
