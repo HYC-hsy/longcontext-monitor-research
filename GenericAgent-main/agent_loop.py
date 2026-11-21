@@ -1,4 +1,4 @@
-import inspect, json, re, os, sys
+import inspect, json, re, os, sys, copy
 from dataclasses import dataclass
 from typing import Any, Optional
 from research_runtime import CompletionProposal, decide_completion, emit as _research_emit, telemetry_enabled as _telemetry_enabled, consume_provider_call as _consume_provider_call, register_pending_pma_reminder as _register_pending_pma_reminder, sha256_json as _sha256_json
@@ -63,7 +63,7 @@ def get_pretty_json(data):
 
 def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_schema,
                       max_turns=40, verbose=True, initial_user_content=None, yield_info=False,
-                      turn_offset=0):
+                      turn_offset=0, continuation_messages=None):
     initial_content = initial_user_content if initial_user_content is not None else user_input
     initial_content = condition_initial_task(
         initial_content, getattr(handler.parent, 'research_condition', None)
@@ -72,6 +72,10 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": initial_content}
     ]
+    if continuation_messages is not None:
+        if not isinstance(continuation_messages, list) or not continuation_messages:
+            raise ValueError('Task continuation requires nonempty current messages')
+        messages = copy.deepcopy(continuation_messages)
     local_turn = 0; turn = int(turn_offset); handler.max_turns = max_turns
     exit_reason = {}; response = None
     _hook('agent_before', locals())
@@ -229,7 +233,8 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
         if yield_info: yield {'turn': turn}
         yield f"\n\n{turnstr}\n\n"
         if turn%10 == 0: client.last_tools = ''  # 每10轮重置一次工具描述
-        _hook('turn_before', locals())
+        if not (continuation_messages is not None and local_turn == 1):
+            _hook('turn_before', locals())
         if pma is not None:
             pma.review()
             reminder = pma.take_reminder()
@@ -237,8 +242,11 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                 # Upstream user_turn appends to the current input, not a new turn.
                 from pma_baseline.runtime import append_reminder
                 messages[-1] = append_reminder(messages[-1], reminder)
+        pre_reminder_messages = copy.deepcopy(messages)
+        pma_reminder = None
         if pma_upstream is not None:
             reminder = pma_upstream.before_actor_call(turn)
+            pma_reminder = reminder
             if reminder:
                 from pma_upstream_bridge import append_reminder
                 messages[-1] = append_reminder(messages[-1], reminder)
@@ -254,7 +262,26 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
                         _register_pending_pma_reminder(
                             event, actor_attempt=turn,
                             pma_event_id=pma_upstream.last_event_id)
-        _hook('llm_before', locals())
+        if not (continuation_messages is not None and local_turn == 1):
+            _hook('llm_before', locals())
+        if os.environ.get('GA_TASK_RECHECK_CAPTURE') == '1':
+            try:
+                from task_recheck_actor_state import capture_pre_request
+                capture_pre_request(turn=turn, client=client, messages=messages,
+                                    pre_reminder_messages=pre_reminder_messages,
+                                    reminder=pma_reminder,
+                                    tools_schema=tools_schema, handler=handler,
+                                    initial_task=initial_content)
+            except Exception as capture_error:
+                # Evidence failure is not a Task action or PMA decision.
+                try:
+                    with open('/logs/agent/task_recheck_capture_errors.jsonl',
+                              'a', encoding='utf-8') as capture_log:
+                        capture_log.write(json.dumps({
+                            'turn': turn, 'error_type': type(capture_error).__name__,
+                            'error': str(capture_error)}, sort_keys=True) + '\n')
+                except Exception:
+                    pass
         pma_trajectory = None
         if pma_predictive:
             from ga_trajectory import GATrajectory
@@ -697,7 +724,7 @@ def _agent_runner_loop_impl(client, system_prompt, user_input, handler, tools_sc
 
 def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                       max_turns=40, verbose=True, initial_user_content=None,
-                      yield_info=False, turn_offset=0):
+                      yield_info=False, turn_offset=0, continuation_messages=None):
     """Keep PoS request scope and worker ownership even on generator close."""
     parent = handler.parent
     enabled = os.environ.get('GA_POS_ENABLED') == '1'
@@ -711,7 +738,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             client, system_prompt, user_input, handler, tools_schema,
             max_turns=max_turns, verbose=verbose,
             initial_user_content=initial_user_content, yield_info=yield_info,
-            turn_offset=turn_offset))
+            turn_offset=turn_offset,
+            continuation_messages=continuation_messages))
     finally:
         active = getattr(parent, '_pma_trajectory', None)
         if active is not None:

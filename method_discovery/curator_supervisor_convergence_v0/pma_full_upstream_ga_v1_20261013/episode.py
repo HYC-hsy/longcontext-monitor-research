@@ -403,6 +403,25 @@ class PMAEpisode:
         reminder = self.agent._get_memory_system_prompt()
         if self.task_knowledge_file is not None:
             self.task_knowledge_file.publish()
+        if os.environ.get("PMA_TASK_RECHECK_CAPTURE_ROOT"):
+            # Optional host-only evidence. Failure must not alter the PMA
+            # receipt, Task input, or the original tool/error protocol.
+            try:
+                from task_recheck_capture import capture_wake_boundary
+                capture_wake_boundary(
+                    run_root=self.archive.parent.parent, run_id=self.run_id,
+                    actor_attempt=attempt, pending_reminder=reminder,
+                    bank_file=self.task_knowledge_file.path,
+                    batch_rounds=self.pma_batch_rounds)
+            except Exception as exc:
+                try:
+                    with (self.archive / "task_recheck_capture_errors.jsonl").open(
+                            "a", encoding="utf-8") as stream:
+                        stream.write(json.dumps({"actor_attempt": attempt,
+                            "error_type": type(exc).__name__, "error": str(exc)},
+                            sort_keys=True) + "\n")
+                except Exception:
+                    pass
         return {"status": "reminder" if reminder else "silent", "reminder": reminder,
                 "actor_attempt": attempt, "delivery": "returned_not_confirmed_in_ga_request"}
 

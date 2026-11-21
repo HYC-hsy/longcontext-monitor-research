@@ -97,6 +97,11 @@ CONTEXT_PREDICTIVE_SOURCE_FILES = tuple(dict.fromkeys(PREDICTIVE_SOURCE_FILES + 
     'vendor/pma_89e5c0d/external/harbor/src/harbor/llms/lite_llm.py',
 )))
 READ_CONTEXT_PREDICTIVE_SOURCE_FILES = CONTEXT_PREDICTIVE_SOURCE_FILES + (
+    "GenericAgent-main/task_recheck_actor_state.py",
+    "GenericAgent-main/task_recheck_branch.py",
+    "GenericAgent-main/task_recheck_branch_entry.py",
+    "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
+    "task_recheck_capture.py",
     "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"
     "task_knowledge_file.py",
     "method_discovery/curator_supervisor_convergence_v0/pma_full_upstream_ga_v1_20261013/"

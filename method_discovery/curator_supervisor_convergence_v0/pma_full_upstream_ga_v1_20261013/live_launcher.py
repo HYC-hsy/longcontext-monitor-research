@@ -849,6 +849,19 @@ def run_live(args) -> dict:
         for key, value in kwargs.items():
             command += ['--ak', f'{key}={value}']
         env = clean_candidate_environment(os.environ)
+        checkpoint_root = os.environ.get('PMA_TASK_RECHECK_CAPTURE_ROOT')
+        if checkpoint_root:
+            if candidate != 'pma_predictive_read_context_v1':
+                raise RuntimeError('Task recheck capture requires the fixed read-context candidate')
+            resolved_capture_root = Path(checkpoint_root).resolve()
+            if not Path(checkpoint_root).is_absolute() or (
+                    resolved_capture_root == root or
+                    resolved_capture_root in root.parents or
+                    root in resolved_capture_root.parents):
+                raise RuntimeError('Task recheck capture root must be absolute and outside this run')
+            env['GA_TASK_RECHECK_CAPTURE'] = '1'
+        else:
+            env.pop('GA_TASK_RECHECK_CAPTURE', None)
         # Provider response originals belong only to the host-side PMA worker.
         env.pop('PMA_PROVIDER_RESPONSE_CAPTURE', None)
         env.pop('PMA_PROVIDER_RESPONSE_CAPTURE_ROOT', None)
