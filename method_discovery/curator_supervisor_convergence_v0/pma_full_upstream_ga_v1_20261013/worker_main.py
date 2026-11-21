@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+from contextvars import ContextVar
 import hashlib
 import inspect
 import json
@@ -44,6 +45,7 @@ def install_http_wire_audit(archive: Path, current_call: dict,
     original_send = httpx.AsyncClient.send
     request_index = 0
     attempts_by_call = {}
+    capture_attempts_by_call = {}
 
     async def observed_send(client, request, *args, **kwargs):
         nonlocal request_index
@@ -60,6 +62,10 @@ def install_http_wire_audit(archive: Path, current_call: dict,
                           else "other_http_request",
             "api_version": request.headers.get("anthropic-version"),
         }
+        scope = current_call['capture_context'].get()
+        capture_scope = (scope if scope is not None
+                         and scope['owner_task'] is asyncio.current_task()
+                         and row['route_kind'] == 'anthropic_messages' else None)
         try:
             body = json.loads(request.content)
             if not isinstance(body, dict):
@@ -86,23 +92,38 @@ def install_http_wire_audit(archive: Path, current_call: dict,
             })
         except Exception as exc:
             row["body_parse_error_type"] = type(exc).__name__
+        capture_row = None
+        if capture_scope is not None and isinstance(row.get('model'), str):
+            sequence = capture_scope['call_sequence']
+            capture_attempts_by_call[sequence] = capture_attempts_by_call.get(sequence, 0) + 1
+            capture_row = {'run_id': current_call.get('run_id'),
+                           'wake': capture_scope['wake'], 'call_sequence': sequence,
+                           'request_index': request_index,
+                           'attempt_in_call': capture_attempts_by_call[sequence]}
         try:
             response = await original_send(client, request, *args, **kwargs)
         except BaseException as exc:
             row.update({"transport_error_type": type(exc).__name__,
                         "ended_epoch": time.time()})
+            if sidecar is not None and capture_row is not None:
+                try:
+                    sidecar._status({**capture_row, 'capture_status': 'transport_error',
+                                     'transport_error_type': type(exc).__name__})
+                except Exception:
+                    pass
             append_private_audit(archive / "memory_http_wire.jsonl", row)
             raise
         row.update({"http_status": response.status_code, "ended_epoch": time.time()})
-        if sidecar is not None and row["route_kind"] == "anthropic_messages":
+        if sidecar is not None and capture_row is not None:
             try:
-                sidecar.capture(response, {"run_id": current_call.get("run_id"), **row},
+                sidecar.capture(response, {**row, **capture_row},
                                 stream=bool(kwargs.get("stream", False)))
             except Exception as exc:
-                sidecar._status({"run_id": current_call.get("run_id"),
-                                 "request_index": request_index,
-                                 "capture_status": "failed",
-                                 "error_type": type(exc).__name__})
+                try:
+                    sidecar._status({**capture_row, "capture_status": "failed",
+                                     "error_type": type(exc).__name__})
+                except Exception:
+                    pass
         append_private_audit(archive / "memory_http_wire.jsonl", row)
         return response
 
@@ -113,7 +134,8 @@ def install_transport_audit(agent, archive: Path) -> None:
     """Observe actual model calls and tool receipts without adding requests."""
     original = agent._memory_llm.call
     calls = 0
-    current_call = {"value": None, "wake": None}
+    current_call = {"value": None, "wake": None,
+                    "capture_context": ContextVar('pma_manager_capture_scope', default=None)}
     def retry_observer(row):
         append_private_audit(archive / "memory_retry_attempts.jsonl",
                              {"call_sequence": calls, **row})
@@ -151,6 +173,9 @@ def install_transport_audit(agent, archive: Path) -> None:
                                   if getattr(candidate_agent, "_history_transforms", None) else None),
             "started_epoch": started,
             "cycle_step": getattr(candidate_agent, '_step', None), "call_sequence": calls})
+        capture_token = current_call['capture_context'].set({
+            'owner_task': asyncio.current_task(), 'call_sequence': calls,
+            'wake': current_call['wake']})
         try:
             kwargs = {"prompt": prompt, "system": system, "tools": tools}
             if message_history is not None:
@@ -192,6 +217,7 @@ def install_transport_audit(agent, archive: Path) -> None:
             status = type(exc).__name__
             raise
         finally:
+            current_call['capture_context'].reset(capture_token)
             current_call["value"] = None
             append_private_audit(archive / "memory_transport.jsonl", {
                 "phase": phase, "status": status,

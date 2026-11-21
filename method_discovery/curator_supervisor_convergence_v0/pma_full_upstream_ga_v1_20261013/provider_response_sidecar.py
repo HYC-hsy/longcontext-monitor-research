@@ -68,34 +68,112 @@ def _stream_events(body: bytes) -> list[bytes]:
     return events
 
 
-def _reasoning_presence(body: bytes, *, stream: bool) -> str:
-    """Classify only captured bytes; never infer provider-internal reasoning."""
+def _reasoning_kind(value: dict, *, stream: bool) -> str:
+    """Inspect Anthropic Messages response positions, never arbitrary tool input."""
+    kinds = set()
+
+    def block(item):
+        if not isinstance(item, dict):
+            return
+        if item.get("type") == "redacted_thinking":
+            kinds.add("unreadable_block")
+        elif item.get("type") == "thinking":
+            content = item.get("thinking")
+            if isinstance(content, str) and content:
+                kinds.add("readable_text")
+            elif content == "" and item.get("signature"):
+                kinds.add("empty_text_signed")
+            elif content is None and "thinking" in item:
+                kinds.add("explicit_null")
+
+    if stream:
+        event = value.get("type")
+        if event == "message_start":
+            for item in (value.get("message") or {}).get("content") or []:
+                block(item)
+        elif event == "content_block_start":
+            block(value.get("content_block"))
+        elif event == "content_block_delta":
+            delta = value.get("delta") or {}
+            if delta.get("type") == "thinking_delta":
+                content = delta.get("thinking")
+                if isinstance(content, str) and content:
+                    kinds.add("readable_text")
+                elif content is None and "thinking" in delta:
+                    kinds.add("explicit_null")
+            elif delta.get("type") == "signature_delta":
+                kinds.add("empty_text_signed")
+    else:
+        for item in value.get("content") or []:
+            block(item)
+        for key in ("thinking", "reasoning_content"):
+            if key in value:
+                content = value[key]
+                if isinstance(content, str) and content:
+                    kinds.add("readable_text")
+                elif content is None:
+                    kinds.add("explicit_null")
+    for kind in ("readable_text", "empty_text_signed", "unreadable_block",
+                 "explicit_null"):
+        if kind in kinds:
+            return kind
+    return "not_returned"
+
+
+def _buffered_kind(body: bytes) -> str:
     try:
-        values = []
-        if stream:
-            for line in body.splitlines():
-                if line.startswith(b"data:") and line[5:].strip() != b"[DONE]":
-                    values.append(json.loads(line[5:].strip()))
-        else:
-            values.append(json.loads(body))
+        value = json.loads(body)
     except (UnicodeDecodeError, json.JSONDecodeError):
         return "unknown"
-    names = {"thinking", "reasoning", "reasoning_content", "signature"}
-    found = []
-    def walk(value):
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key in names or value.get("type") in ("thinking", "reasoning"):
-                    found.append(item)
-                walk(item)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
-    for value in values:
-        walk(value)
-    if not found:
-        return "absent"
-    return "null" if all(item is None for item in found) else "present"
+    return _reasoning_kind(value, stream=False) if isinstance(value, dict) else "unknown"
+
+
+def _stream_result(body: bytes, *, consumed_to_eof: bool) -> tuple[str, str]:
+    """Require protocol message_stop; EOF and HTTP 200 alone are insufficient."""
+    if not consumed_to_eof:
+        return "interrupted", "unknown"
+    kinds = []
+    stopped = False
+    errored = False
+    events = _stream_events(body)
+    trailing_partial = bool(events and not events[-1].endswith((b"\n\n", b"\r\n\r\n")))
+    try:
+        for event in events:
+            if not event.endswith((b"\n\n", b"\r\n\r\n")):
+                continue
+            event_name = None
+            data_lines = []
+            for line in event.splitlines():
+                if line.startswith(b"event:"):
+                    event_name = line[6:].strip().decode("utf-8")
+                elif line.startswith(b"data:"):
+                    data_lines.append(line[5:].strip())
+            if event_name == "error":
+                errored = True
+            if not data_lines:
+                continue
+            raw = b"\n".join(data_lines)
+            if raw == b"[DONE]":
+                continue
+            value = json.loads(raw)
+            if not isinstance(value, dict):
+                return "interrupted", "unknown"
+            if value.get("type") == "error":
+                errored = True
+            if value.get("type") == "message_stop" or event_name == "message_stop":
+                stopped = True
+            kinds.append(_reasoning_kind(value, stream=True))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "interrupted", "unknown"
+    if errored:
+        return "stream_error", "unknown"
+    if trailing_partial or not stopped:
+        return "interrupted", "unknown"
+    for kind in ("readable_text", "empty_text_signed", "unreadable_block",
+                 "explicit_null"):
+        if kind in kinds:
+            return "normal_termination", kind
+    return "normal_termination", "not_returned"
 
 
 class ResponseSidecar:
@@ -175,7 +253,7 @@ class ResponseSidecar:
             self._status({**safe, "capture_status": "complete", "mode": "buffered",
                           "body_path": str(path), "body_bytes": len(body),
                           "body_sha256": _sha(body), "response_id": _response_id(body),
-                          "reasoning_field_presence": _reasoning_presence(body, stream=False)})
+                          "reasoning_record_kind": _buffered_kind(body)})
         except Exception as exc:
             self._status({**safe, "capture_status": "failed", "mode": "buffered",
                           "error_type": type(exc).__name__})
@@ -225,13 +303,14 @@ class _StreamCapture:
                 for ordinal, event in enumerate(events, 1):
                     output.write(json.dumps({"ordinal": ordinal,
                         "raw_event_base64": base64.b64encode(event).decode("ascii")}) + "\n")
+            termination, reasoning = _stream_result(body, consumed_to_eof=complete and not self.failed)
             self.sidecar._status({**self.metadata,
-                "capture_status": "complete" if complete and not self.failed else "incomplete",
+                "capture_status": "complete" if complete and not self.failed
+                                  else "incomplete",
                 "mode": "stream", "body_path": str(self.path), "body_bytes": len(body),
                 "body_sha256": _sha(body), "chunks": len(self.chunks), "events": len(events),
                 "response_id": _response_id(body),
-                "reasoning_field_presence": (_reasoning_presence(body, stream=True)
-                                              if complete and not self.failed else "unknown")})
+                "stream_termination": termination, "reasoning_record_kind": reasoning})
         except Exception as exc:
             self.sidecar._status({**self.metadata, "capture_status": "failed",
                                   "mode": "stream", "error_type": type(exc).__name__})
