@@ -13,6 +13,7 @@ import os
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import provider_response_sidecar as capture_module
 from provider_response_sidecar import ResponseSidecar, _stream_events
 
 
@@ -285,6 +286,123 @@ class SidecarTests(unittest.TestCase):
             self.assertEqual([x async for x in response.aiter_raw()], chunks)
             self.assertEqual(source.reads, len(chunks))
             self.assertEqual(self.status()[-1]['capture_status'], 'incomplete')
+        asyncio.run(run())
+
+    def test_both_status_outputs_fail_at_initialization(self):
+        class BrokenStderr:
+            def write(self, value):
+                raise OSError('stderr unavailable')
+        with (patch.object(capture_module, '_write_line',
+                           side_effect=OSError('status unavailable')),
+              patch.object(capture_module, 'sys',
+                           SimpleNamespace(stderr=BrokenStderr()))):
+            result = ResponseSidecar.from_environment(
+                {'PMA_PROVIDER_RESPONSE_CAPTURE': '1',
+                 'PMA_PROVIDER_RESPONSE_CAPTURE_ROOT': 'relative-not-allowed'},
+                run_id='sample-1', private=self.private,
+                requests=self.spool / 'requests', responses=self.spool / 'responses')
+        self.assertIsNone(result)
+
+    def test_both_status_outputs_fail_during_response_and_transport_error(self):
+        class BrokenStderr:
+            def write(self, value):
+                raise OSError('stderr unavailable')
+        async def run():
+            base = Path(__file__).resolve().parents[1]
+            os.environ['LITELLM_LOCAL_MODEL_COST_MAP'] = 'True'
+            sys.path[:0] = [str(base / 'vendor' / 'pma_89e5c0d' / 'src'),
+                            str(base / 'vendor' / 'pma_89e5c0d' / 'external' / 'harbor' / 'src')]
+            from worker_main import install_http_wire_audit
+            original_send = httpx.AsyncClient.send
+            body = b'{"id":"msg-double-fail","content":[{"type":"tool_use","id":"tool-1"}]}'
+            sidecar = self.make_sidecar()
+
+            async def scenario(enabled, name):
+                scope = ContextVar(name, default=None)
+                archive = self.root / name
+                archive.mkdir()
+                install_http_wire_audit(archive, {'value': 9, 'wake': 20,
+                                                   'run_id': 'sample-1',
+                                                   'capture_context': scope},
+                                        sidecar if enabled else None)
+                calls = 0
+                def handler(request):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        raise httpx.ConnectError('original transport failure')
+                    return httpx.Response(200, content=body)
+                try:
+                    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                        token = scope.set({'owner_task': asyncio.current_task(),
+                                           'call_sequence': 9, 'wake': 20})
+                        try:
+                            try:
+                                await client.post('https://example.invalid/messages',
+                                                  json={'model': 'test-model'})
+                            except httpx.ConnectError as exc:
+                                error = (type(exc).__name__, str(exc))
+                            else:
+                                self.fail('original exception was swallowed')
+                            response = await client.post('https://example.invalid/messages',
+                                                         json={'model': 'test-model'})
+                        finally:
+                            scope.reset(token)
+                    return error, calls, response.content, response.json()['content'][0]['id']
+                finally:
+                    httpx.AsyncClient.send = original_send
+
+            off = await scenario(False, 'double_off')
+            with (patch.object(capture_module, '_write_line',
+                               side_effect=OSError('status unavailable')),
+                  patch.object(capture_module, 'sys',
+                               SimpleNamespace(stderr=BrokenStderr())),
+                  patch.object(sidecar, '_base',
+                               side_effect=OSError('capture unavailable'))):
+                on = await scenario(True, 'double_on')
+            self.assertEqual(off, on)
+        asyncio.run(run())
+
+    def test_both_status_outputs_fail_during_stream_write_and_finish(self):
+        class BrokenStderr:
+            def write(self, value):
+                raise OSError('stderr unavailable')
+        class FailingFile:
+            def __init__(self, original, stage):
+                self.original, self.stage = original, stage
+            def write(self, data):
+                if self.stage == 'write':
+                    raise OSError('stream capture write failure')
+                return self.original.write(data)
+            def flush(self):
+                if self.stage == 'finish':
+                    raise OSError('stream capture finish failure')
+                return self.original.flush()
+            def fileno(self):
+                return self.original.fileno()
+            def close(self):
+                return self.original.close()
+        async def run():
+            chunks = [b'event: message_start\ndata: {"type":"message_start"}\n\n',
+                      b'event: message_stop\ndata: {"type":"message_stop"}\n\n']
+            baseline = [x async for x in httpx.Response(
+                200, stream=Chunks(chunks)).aiter_raw()]
+            sidecar = self.make_sidecar()
+            with (patch.object(capture_module, '_write_line',
+                               side_effect=OSError('status unavailable')),
+                  patch.object(capture_module, 'sys',
+                               SimpleNamespace(stderr=BrokenStderr()))):
+                for index, stage in enumerate(('write', 'finish'), 1):
+                    source = Chunks(chunks)
+                    response = httpx.Response(200, stream=source)
+                    sidecar.capture(response, {**self.meta,
+                                               'request_index': index}, stream=True)
+                    writer = response.stream.writer
+                    original = writer.file
+                    writer.file = FailingFile(original, stage)
+                    self.assertEqual([x async for x in response.aiter_raw()], baseline)
+                    self.assertEqual(source.reads, len(chunks))
+                    original.close()
         asyncio.run(run())
 
     def test_manager_transport_scope_and_existing_mandatory_audit_failure(self):

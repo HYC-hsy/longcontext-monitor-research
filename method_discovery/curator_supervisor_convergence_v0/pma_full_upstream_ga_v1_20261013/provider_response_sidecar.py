@@ -215,8 +215,13 @@ class ResponseSidecar:
         except Exception as exc:
             # This fallback is metadata only. Capture failure must not change
             # provider requests, retries, tool receipts or Task execution.
-            print(f"provider response capture status write failed: {type(exc).__name__}",
-                  file=sys.stderr)
+            try:
+                print(f"provider response capture status write failed: {type(exc).__name__}",
+                      file=sys.stderr)
+            except Exception:
+                # stderr may itself be closed or unavailable. No third output
+                # path is allowed to turn optional capture into a model error.
+                pass
 
     def _status(self, value: dict) -> None:
         self._safe_status(self.status_path, value)
