@@ -101,7 +101,7 @@ def _reasoning_kind(value: dict, *, stream: bool) -> str:
                     kinds.add("readable_text")
                 elif content is None and "thinking" in delta:
                     kinds.add("explicit_null")
-            elif delta.get("type") == "signature_delta":
+            elif delta.get("type") == "signature_delta" and delta.get("signature"):
                 kinds.add("empty_text_signed")
     else:
         for item in value.get("content") or []:

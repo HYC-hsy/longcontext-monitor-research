@@ -140,6 +140,21 @@ class SidecarTests(unittest.TestCase):
             self.assertEqual(self.status()[-1]['capture_status'], 'incomplete')
         asyncio.run(run())
 
+    def test_stream_empty_signed_block(self):
+        async def run():
+            sidecar = self.make_sidecar()
+            chunks = [
+                b'event: content_block_start\ndata: {"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}\n\n',
+                b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"signature_delta","signature":"signed"}}\n\n',
+                b'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+            ]
+            response = httpx.Response(200, stream=Chunks(chunks))
+            sidecar.capture(response, self.meta, stream=True)
+            self.assertEqual([x async for x in response.aiter_raw()], chunks)
+            self.assertEqual(self.status()[-1]['reasoning_record_kind'], 'empty_text_signed')
+            self.assertEqual(self.status()[-1]['stream_termination'], 'normal_termination')
+        asyncio.run(run())
+
     def test_same_route_requires_manager_owner_task(self):
         async def run():
             base = Path(__file__).resolve().parents[1]
