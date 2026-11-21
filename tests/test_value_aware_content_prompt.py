@@ -9,7 +9,7 @@ from test_predictive_tool_recovery import block_network  # noqa: F401
 
 
 READ_BEFORE_REMINDER = '- Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.\n'
-EXPECTED_SYSTEM = '''You are the task agent's information manager, helping it use existing information in long tasks. Your role is to draw on previously saved information to remind it when its work shows a disconnect between earlier and later steps, and to predict which information will be valuable for later work, then organize and save it.
+EXPECTED_SYSTEM = '''You are the task agent's information manager. Save information from the task that will be valuable for later work. When the task agent's work shows a disconnect between earlier and later steps, remind it to revisit the original task and the work done so far, and reconsider what to do next.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
@@ -21,12 +21,12 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 ## Action Principles
 
-- Before calling memory_add or send_reminder, briefly explain which information you selected and why.
+- Before calling memory_add, briefly explain which information you selected and why. Before calling send_reminder, briefly explain why a reminder is needed now.
 - Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.
 
 Please manage task information in the following order:
 
-1. Judge and decide the reminder. Use memory_read to review information previously saved in the knowledge bank. Consider the newly observed execution trajectory. When the task agent's work shows a disconnect between earlier and later steps, use send_reminder to bring both the disconnect and the relevant earlier and later information back to its attention, so it can revisit, check, and address the issue.
+1. Judge and decide the reminder. Use memory_read to review information previously saved in the knowledge bank. Consider the newly observed execution trajectory. When the task agent's work shows a disconnect between earlier and later steps, use send_reminder to prompt it to revisit the original task and the work done so far, and reconsider what to do next.
 
 2. Predict and save. After deciding whether to remind the task agent, you must predict which information from the original task description and the newly observed execution trajectory will still be worth presenting to the task agent to support subsequent work after the task has progressed for another eight turns. Use memory_add to organize, restate, and save the selected information and necessary context in the knowledge bank, so that the task agent can accurately understand what the original materials conveyed at the time even when it can no longer see them.
 '''
