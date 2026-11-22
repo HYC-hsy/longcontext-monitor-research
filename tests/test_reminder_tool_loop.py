@@ -18,7 +18,7 @@ def test_no_tools_no_reminder_and_no_hard_read_gate():
     assert result.termination=='wake_no_tool' and len(a.llm.calls)==1
     assert {t['function']['name'] for t in a.llm.calls[0]['tools']} == {'memory_add','memory_read','send_reminder'}
     assert '<context_for_action>' not in REMINDER_TOOL_SYSTEM
-    assert 'Action Principles' in REMINDER_TOOL_SYSTEM
+    assert 'Action Principles' not in REMINDER_TOOL_SYSTEM
 
 
 def test_mixed_ordered_batch_exact_content_and_receipts():
@@ -89,11 +89,10 @@ def test_missing_read_body_does_not_trigger_save_guidance():
     assert a.llm.calls[1]['system']==REMINDER_TOOL_SYSTEM
 
 
-def test_missing_add_body_retains_nonblocking_forecast_soft_reminder():
+def test_missing_add_body_does_not_trigger_forecast_explanation_requirement():
     a=Agent(llm=Script(add(content=''),done()))
     run(a)
-    from memory_agent.memory.read_context_predictive_memory_agent import PUBLIC_FORECAST_REMINDER
-    assert a.llm.calls[1]['system']==REMINDER_TOOL_SYSTEM+'\n\n'+PUBLIC_FORECAST_REMINDER
+    assert a.llm.calls[1]['system']==REMINDER_TOOL_SYSTEM
 
 
 def test_source_identity_tracks_new_runtime_module():
@@ -151,6 +150,6 @@ def test_provider_truncation_after_recording_fails_without_result(provider,monke
 
 def test_prompt_and_schema_explain_ordered_nonreplacing_reminders():
     from memory_agent.memory.reminder_tool_memory_agent import REMINDER_TOOL
-    wording='All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; none replaces an earlier reminder.'
+    wording='All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; later reminders do not replace earlier ones.'
     assert wording in REMINDER_TOOL_SYSTEM
     assert wording in REMINDER_TOOL['function']['description']

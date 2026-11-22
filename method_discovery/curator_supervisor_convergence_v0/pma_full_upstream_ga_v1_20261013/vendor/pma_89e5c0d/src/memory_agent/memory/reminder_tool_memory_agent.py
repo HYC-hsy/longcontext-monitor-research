@@ -5,37 +5,32 @@ from .read_context_predictive_memory_agent import (
     ReadContextPredictiveMemoryAgent, UnifiedMemoryAgentResult, MemoryOperation,
     PMAPhaseError, PMAToolRecoveryExhausted, PMADecisionRecoveryExhausted,
     MAX_CONSECUTIVE_TOOL_ERROR_ROUNDS, MAX_CONSECUTIVE_DECISION_ERROR_ROUNDS,
-    PUBLIC_FORECAST_REMINDER, has_public_text,
+    has_public_text,
 )
 
-REMINDER_TOOL_SYSTEM = """You are the task agent's information manager. Your role is to save information from the task that will be valuable for later work and, when the task agent's work shows a disconnect between earlier and later steps, to present the relevant material from both so it can revisit the original task and the work done so far and decide for itself what to do next.
+REMINDER_TOOL_SYSTEM = """You are the task agent's information manager.
 
-The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
+The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the newly observed execution trajectory.
 
 ## Tools
 
+- memory_read: Read information saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
+- send_reminder: Record a reminder for the task agent. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; later reminders do not replace earlier ones.
 - memory_add: Save information in the knowledge bank.
-- memory_read: Read all information currently saved in the knowledge bank. Set bank_id to "knowledge" when calling it.
-- send_reminder: Record material and any necessary context to present to the task agent. Everything successfully recorded during a wake is delivered in call order after that wake completes normally; later content does not replace earlier content.
 
-## Action Principles
+Work in the following order:
 
-- Before calling memory_add, briefly explain which information you selected and why. Before calling send_reminder, briefly explain which material you selected and why it needs to be presented now.
-- Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.
+1. Judge and remind. Use memory_read to review the knowledge bank. Consider it alongside the original task and the newly observed execution trajectory. When the task agent's work shows a disconnect between earlier and later steps, use send_reminder to remind it.
 
-Please manage task information in the following order:
-
-1. Judge and present material. Use memory_read to review information previously saved in the knowledge bank, and consider it alongside the newly observed execution trajectory. When the task agent's work shows a disconnect between earlier and later steps, use send_reminder to present the relevant material from both, together with any necessary context, so the task agent can go back and check it and decide for itself what to do next.
-
-2. Predict and save. After making the decision above, you must predict which information from the original task description and the newly observed execution trajectory will still be worth presenting to the task agent to support subsequent work after the task has progressed for another eight turns. Use memory_add to organize the selected information and any necessary context into material that can be revisited later, and save it in the knowledge bank. Even when the task agent can no longer see the original records, it should be able to understand what the information meant at the time and use it to make further judgments.
+2. Predict and save. You must first predict which information from the original task and the newly observed execution trajectory will still be useful to the task agent's later work after eight more task turns. Based on this prediction, use memory_add to organize and save the selected information in the knowledge bank.
 """
 
 REMINDER_TOOL = {
     'type': 'function', 'function': {
         'name': 'send_reminder',
-        'description': 'Record material and any necessary context to present to the task agent. Everything successfully recorded during a wake is delivered in call order after that wake completes normally; later content does not replace earlier content. This call does not deliver it immediately.',
+        'description': 'Record a reminder for the task agent. All reminders successfully recorded during a wake are delivered in call order after that wake completes normally; later reminders do not replace earlier ones. This call does not deliver it immediately.',
         'parameters': {'type': 'object', 'properties': {
-            'content': {'type': 'string', 'description': 'The complete material and necessary context to present to the task agent. It may include original text, code, or formulas.'}
+            'content': {'type': 'string', 'description': 'The content of the reminder for the task agent.'}
         }, 'required': ['content'], 'additionalProperties': False},
     },
 }
@@ -95,18 +90,11 @@ class ReminderToolMemoryAgent(ReadContextPredictiveMemoryAgent):
         self._new_trajectory = None
         error_rounds = empty_rounds = 0
         while True:
-            system = REMINDER_TOOL_SYSTEM
-            if self._p1_public_text_missing:
-                system += '\n\n' + PUBLIC_FORECAST_REMINDER
-            response = await self.llm.call(prompt=user_prompt, system=system,
+            response = await self.llm.call(prompt=user_prompt, system=REMINDER_TOOL_SYSTEM,
                 tools=self.get_tools_schema(), message_history=prior)
             operations, _ = self._record_p1_response(response)
             self._phase1_operations.extend(operations)
             raw = getattr(response, 'content', None) or ''
-            if any(op.action == 'add' for op in operations):
-                self._p1_public_text_missing = not has_public_text(raw)
-            elif has_public_text(raw):
-                self._p1_public_text_missing = False
             failed = any(not operation.success for operation in operations)
             completed = is_wake_completion(response)
             self._unified_rounds.append({
