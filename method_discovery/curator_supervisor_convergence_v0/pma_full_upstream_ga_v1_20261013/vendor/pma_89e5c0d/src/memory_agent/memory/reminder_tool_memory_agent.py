@@ -8,7 +8,7 @@ from .read_context_predictive_memory_agent import (
     PUBLIC_FORECAST_REMINDER, has_public_text,
 )
 
-REMINDER_TOOL_SYSTEM = """You are the task agent's information manager. Your role is to save information from the task that will be valuable for later work and, when the task agent's work shows a disconnect between earlier and later steps, to present the relevant material from both so it can revisit the original task and the work done so far and decide for itself what to do next.
+REMINDER_TOOL_SYSTEM = """You are the task agent's "selective attention" module. Your role is to save information from the task that will be valuable for later work and, when the task agent's work shows a disconnect between earlier and later steps, to present the relevant material from both, bringing overlooked information back into consideration so it can go back and check the material and decide for itself what to do next.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
