@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import unittest
 
 from pma_model_profile import load_profile, READ_CONTEXT
+from method_discovery.curator_supervisor_convergence_v0.pma_full_upstream_ga_v1_20261013.live_launcher import _bound_task_model
 from responses_memory_llm import ResponsesMemoryLLM, response_input
 from episode import PMAEpisode, construct_upstream
 from memory_agent.memory.ga_context_history import (
@@ -16,6 +17,27 @@ from memory_agent.memory.ga_context_history import (
 
 
 class Model4TransportTests(unittest.TestCase):
+    def test_dual_claude_model_binding(self):
+        profile = {"provider": "anthropic", "api_mode": "messages",
+                   "model": "claude-opus-5-5", "apibase": "https://example.invalid/v1",
+                   "apikey": "test-only", "thinking_type": "adaptive",
+                   "temperature": 1, "reasoning_effort": "high",
+                   "max_tokens": 8192, "read_timeout": 300, "max_retries": 8}
+        name, loaded = load_profile(json.dumps({"pma_model": profile}).encode(), READ_CONTEXT)
+        self.assertEqual((name, loaded["model"]), ("pma_model", "claude-opus-5-5"))
+        for task_model in ("claude-opus-4-8", "claude-opus-5"):
+            manifest = {"resolved_models_public": {"task": {"model": task_model}}}
+            self.assertEqual(_bound_task_model(manifest, READ_CONTEXT), task_model)
+        with self.assertRaises(RuntimeError):
+            _bound_task_model({"resolved_models_public": {"task": {"model": "claude-opus-5-5"}}}, READ_CONTEXT)
+        with self.assertRaises(RuntimeError):
+            _bound_task_model({"resolved_models_public": {"task": {"model": "claude-opus-5"}}}, "U")
+        with TemporaryDirectory() as directory:
+            agent = construct_upstream(Path(directory), memory_profile=loaded,
+                                       research_candidate=READ_CONTEXT)
+            self.assertEqual(agent._memory_llm._model_name, "anthropic/claude-opus-5-5")
+            self.assertEqual(type(agent._memory_agent).__name__, "ReminderToolMemoryAgent")
+
     def profile(self, model="gpt-6.1-sol"):
         return {"provider": "openai", "api_mode": "responses", "model": model,
                 "apibase": "https://example.invalid/v1", "apikey": "test-only",

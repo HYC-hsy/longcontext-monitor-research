@@ -11,7 +11,7 @@ import math
 
 
 READ_CONTEXT = "pma_predictive_read_context_v1"
-CLAUDE_MODELS = {"claude-opus-4-8", "claude-opus-5", "claude-fable-5"}
+CLAUDE_MODELS = {"claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-fable-5"}
 OPENAI_MODELS = {"gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"}
 
 

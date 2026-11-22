@@ -217,8 +217,11 @@ def prepare(source: Path, task_profile: Path, pma_profile: Path,
     task_settings = runpy.run_path(str(task_profile))[
         'native_claude_cc_vibe_opus48']
     pma_profile_name, pma_settings = load_profile(pma_profile.read_bytes(), candidate)
-    if task_settings.get('model') != 'claude-opus-4-8':
-        raise RuntimeError('frozen Task model is not Opus 4.8')
+    allowed_task_models = ({'claude-opus-4-8', 'claude-opus-5'}
+                           if candidate == 'pma_predictive_read_context_v1'
+                           else {'claude-opus-4-8'})
+    if task_settings.get('model') not in allowed_task_models:
+        raise RuntimeError('Task model is not bound to the selected candidate')
     tasks = tuple(dict.fromkeys(row['task'] for row in slots))
     assets = {}
     test_coverage = {}

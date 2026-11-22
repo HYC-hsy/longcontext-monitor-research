@@ -30,6 +30,18 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _bound_task_model(manifest: dict, candidate: str) -> str:
+    """Use the model resolved from the byte-pinned Task profile at prepare time."""
+    task = manifest.get('resolved_models_public', {}).get('task', {})
+    model = task.get('model')
+    allowed = ({'claude-opus-4-8', 'claude-opus-5'}
+               if candidate == 'pma_predictive_read_context_v1'
+               else {'claude-opus-4-8'})
+    if model not in allowed:
+        raise RuntimeError('frozen Task model differs from selected candidate')
+    return model
+
+
 def _derive_uncapped_task(root: Path) -> dict:
     """Modify only the new run's materialized task copy, never the fixed asset."""
     path = root / 'public_task/task.toml'
@@ -809,6 +821,7 @@ def run_live(args) -> dict:
             {'type': 'bind', 'source': str((root / 'bundle/source').resolve(strict=True)),
              'target': '/opt/genericagent-source', 'read_only': True},
         ]
+        task_model = _bound_task_model(manifest, candidate)
         command = [str(Path(args.harbor_python).resolve(strict=True)), '-m',
             'method_discovery.curator_supervisor_convergence_v0.'
             'pma_full_upstream_ga_v1_20261013.pma_harbor_cli',
@@ -816,7 +829,7 @@ def run_live(args) -> dict:
             '--path', str(root / 'public_task'),
             '--agent', ('method_discovery.curator_supervisor_convergence_v0.'
                         'pma_full_upstream_ga_v1_20261013.harbor_adapter:HarborGenericAgent'),
-            '--model', 'claude-opus-4-8', '--mounts', json.dumps(mounts),
+            '--model', task_model, '--mounts', json.dumps(mounts),
             '--extra-docker-compose', str(root / 'bundle/isolation.compose.json'),
             '--n-concurrent', '1', '--max-retries', '0', '--yes',
             '--enable-verification',
@@ -829,7 +842,7 @@ def run_live(args) -> dict:
                 'method_discovery.curator_supervisor_convergence_v0.'
                 'pma_full_upstream_ga_v1_20261013.native_shared_verifier:NativeSharedVerifier']
         kwargs = {'llm_no': 0, 'run_id': args.run_id, 'task_id': args.task,
-                  'expected_model': 'claude-opus-4-8', 'python_home': args.python_home,
+                  'expected_model': task_model, 'python_home': args.python_home,
                   'ga_source_sha256': prepared['ga_bundle_tree_sha256'],
                   'timeout_sec': (('uncapped' if agent_seconds is None else agent_seconds)
                       if runtime_policy is not None else 180 if fixture else
