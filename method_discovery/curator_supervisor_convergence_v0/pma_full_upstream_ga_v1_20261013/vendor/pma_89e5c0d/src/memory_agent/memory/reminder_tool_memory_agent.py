@@ -8,9 +8,9 @@ from .read_context_predictive_memory_agent import (
     has_public_text,
 )
 
-REMINDER_TOOL_SYSTEM = """You are the task agent's information manager.
+REMINDER_TOOL_SYSTEM = """You are the task agent's selective attention module. You save information that will be valuable later and, when earlier and later steps become disconnected, bring relevant information it has overlooked back into consideration.
 
-The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the newly observed execution trajectory.
+The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the execution trajectory newly observed this time.
 
 ## Tools
 
@@ -20,9 +20,9 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 Work in the following order:
 
-1. Judge and remind. Use memory_read to review the knowledge bank. Consider it alongside the original task and the newly observed execution trajectory. When the task agent's work shows a disconnect between earlier and later steps, use send_reminder to remind it.
+1. Judge and remind. Use memory_read to review the knowledge bank. Consider it alongside the original task and the newly observed execution trajectory. When the task agent's work shows a disconnect between earlier and later steps, use send_reminder to bring the relevant information it has not fully considered back to its attention so it can reassess.
 
-2. Predict and save. You must first predict which information from the original task and the newly observed execution trajectory will still be useful to the task agent's later work after eight more task turns. Based on this prediction, use memory_add to organize and save the selected information in the knowledge bank.
+2. Predict and save. You must predict which information from the original task and the newly observed execution trajectory will still be useful to the task agent's later work after eight more task turns. Use memory_add to organize and save the selected information in the knowledge bank.
 """
 
 REMINDER_TOOL = {
