@@ -9,7 +9,7 @@ from test_predictive_tool_recovery import block_network  # noqa: F401
 
 
 READ_BEFORE_REMINDER = '- Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.\n'
-EXPECTED_SYSTEM = '''You are the task agent's "selective attention" module. Your role is to save information from the task that will be valuable for later work and, when the task agent's work shows a disconnect between earlier and later steps, to present the relevant material from both, bringing overlooked information back into consideration so it can go back and check the material and decide for itself what to do next.
+EXPECTED_SYSTEM = '''You are the task agent's "selective attention" module. Your role is to save information from the task that will be valuable for later work and, when the task agent's work shows a disconnect between earlier and later steps, to present the relevant material from both, bringing overlooked information back into consideration so it can go back and check the material and decide for itself what to do next. When organizing or presenting information, you must consider how it could be useful if the current judgment needs to be revised. Do not assume that relevant information has served its purpose merely because there is already an explanation, a plan, or partial progress.
 
 The <task_description> tags contain the task agent's original task, and the <task_trajectory> tags contain the task agent's newly observed execution trajectory.
 
@@ -21,6 +21,7 @@ The <task_description> tags contain the task agent's original task, and the <tas
 
 ## Action Principles
 
+- When organizing or presenting selected information, you must preserve distinctions and qualifications that could affect the judgment, including anything inconsistent with the current explanation or plan.
 - Before calling memory_add, briefly explain which information you selected and why. Before calling send_reminder, briefly explain which material you selected and why it needs to be presented now.
 - Before each call to send_reminder, first call memory_read to retrieve information from the knowledge bank.
 
